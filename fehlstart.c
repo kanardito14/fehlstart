@@ -2,7 +2,7 @@
 *   fehlstart - a small launcher written in gnu c99
 *   this source is publieshed under the GPLv3 license.
 *   copyright 2011 by maep
-*   build: gcc fehlstart.c -o fehlstart -std=gnu99 -Wall -O2 -s `pkg-config --cflags --libs gtk+-2.0`
+*   build: gcc fehlstart.c -o fehlstart -std=gnu99 `pkg-config --cflags --libs gtk+-2.0`
 */
 
 #include <ctype.h>
@@ -46,10 +46,6 @@
 #define INITIAL_STRING_HEAP_CAPACITY    0x4000
 #define INPUT_STRING_SIZE               0xff
 #define SHOW_IGNORE_TIME                100000
-
-// some laziness macros
-#define RETURN_VOID_IF(condition) if (condition) return
-#define RETURN_IF(condition, value) if (condition) return (value)
 
 // string "constructor" macros
 #define STR_S(arg) ((String) {(arg), sizeof(arg) - 1})      // for static strings (comile time)
@@ -214,13 +210,12 @@ bool str_ends_with_i(String s, String suffix)
 {
     size_t len = s.len;
     size_t slen = suffix.len;
-    RETURN_IF(slen > len, false);
+    if (slen > len)
+        return false;
     len -= slen;
     for (size_t i = 0; i < slen; i++)
-    {
-        bool equal = tolower(s.str[len + i]) == tolower(suffix.str[i]);
-        RETURN_IF(!equal, false);
-    }
+        if (tolower(s.str[len + i]) != tolower(suffix.str[i]))
+            return false;
     return true;
 }
 
@@ -235,7 +230,8 @@ int str_compare_i(String a, String b)
     for (size_t i = 0; i < a.len && i < b.len; i++)
     {
         int diff = tolower(a.str[i]) - tolower(b.str[i]);
-        RETURN_IF(diff != 0, diff);
+        if (diff != 0)
+            return diff;
     }
     return a.len - b.len;
 }
@@ -335,7 +331,8 @@ void populate_launch_list(String dir_name)
 {
     printf("reading %s\n", dir_name.str);
     DIR* dir = opendir(dir_name.str);
-    RETURN_VOID_IF(dir == 0);
+    if (dir == 0)
+        return;
     struct dirent* ent = 0;
     while ((ent = readdir(dir)) != 0)
     {
@@ -371,11 +368,12 @@ void launch_action(String cmd, Action* action)
     pid_t pid = fork();
     if (pid == 0)
     {
+        setsid(); // "detatch" from parent process
+        signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
         Launch* launch = action->data;
         GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
         if (info != 0)
         {
-            setsid(); // "detatch" from parent process
             g_app_info_launch(G_APP_INFO(info), 0, 0, 0);
             g_object_unref(G_OBJECT(info));
         }
@@ -414,7 +412,8 @@ void update_action_list(void)
 
 void filter_action_list(String filter)
 {
-    RETURN_VOID_IF(filter.len == 0);
+    if (filter.len == 0)
+        return;
 
     if (filter_list_capacity < action_list_capacity)
     {
@@ -468,7 +467,8 @@ void run_selected()
 
 void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
 {
-    RETURN_VOID_IF(!settings[SHOW_ICON].value.i);
+    if (!settings[SHOW_ICON].value.i)
+        return;
 
     GIcon* icon = 0;
     if (g_path_is_absolute(name))

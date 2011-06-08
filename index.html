@@ -6,19 +6,18 @@ I've written fehlstart because gnome-do and others do way more than what I need.
 gnome-do uses mono which I feel requires too much resources to perform a simple
 task like application launching. the source is released as GPLv3.
 
-things that work:
- * launching applications
- * show application icons
+what it does:
+ * launch applications
  * global hotkey (win + space)
 
 to-do list:
- * swap gio for flex
+ * choice learning
  * settings editor
  * simple file search
- * choice learning
  * browser search
 
 maybe later:
+ * remove gio dependency
  * libpurple/pidgin support
  * simple calculator
 
@@ -27,14 +26,15 @@ requirements:
  * gtk+-2.0 dev package
 
 build instructions:
- * gcc fehlstart.c -o fehlstart -std=gnu99 -O2 `pkg-config --cflags --libs gtk+-2.0`
+ * gcc fehlstart.c -o fehlstart -std=gnu99 `pkg-config --cflags --libs gtk+-2.0`
 
 notes:
- ubuntu users: the unity shell already binds the win key
+ ubuntu: the unity shell already binds the win key
+ arch: gtk+ doesn't seem to come with gio
 
- about 900 lines of plain c code. I used some gcc and linux specific stuff.
- the .desktop files are read with gio. if you're running on a low-end machine,
- disabling icons will improve performance considerably.
+ about 800 lines of c code. I used some gcc and linux specific stuff. the .desktop
+ files are read with gio. if you're running on a low-end machine, disabling icons
+ will improve performance considerably.
 
 download v0.2: <a href=fehlstart.c>fehlstart.c</a> (21 KiB)
 </pre></body></html>
