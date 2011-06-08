@@ -375,7 +375,7 @@ void launch_action(String cmd, Action* action)
         GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
         if (info != 0)
         {
-            block_sigint();
+            setsid(); // "detatch" from parent process
             g_app_info_launch(G_APP_INFO(info), 0, 0, 0);
             g_object_unref(G_OBJECT(info));
         }
@@ -697,24 +697,15 @@ void create_widgets(void)
     gtk_widget_show(input_label);
 }
 
-int change_to_home_dir(void) // to stop gcc from bitching about ignored refurn value
+int change_to_home_dir(void) // to stop gcc from bitching about ignored return value
 {
     int err = chdir(getenv("HOME"));
     return err;
 }
 
-void block_sigint(void)
-{
-    sigset_t newmask, oldmask;
-    sigemptyset(&newmask);
-    sigaddset(&newmask, SIGINT);
-    sigprocmask(SIG_BLOCK, &newmask, &oldmask);
-}
-
-// guess the desktop environment, problem with DESKTOP_SESSION
-// is that some distros put their name there
 String detect_desktop_environment()
 {
+    // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
     char* kde1 = getenv("KDE_FULL_SESSION");
     char* gnome = getenv("GNOME_DESKTOP_SESSION_ID");
@@ -732,7 +723,7 @@ String detect_desktop_environment()
         desktop = STR_S("XFCE");
     // todo:
     //~ LXDE	LXDE Desktop
-    //~ ROX	ROX Desktop
+    //~ ROX	    ROX Desktop
     //~ Unity	Unity Shell
     printf("guessing desktop environment: %s\n", desktop.str);
     return desktop;
