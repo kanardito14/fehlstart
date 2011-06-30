@@ -9,12 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 #include <stdbool.h>
 
 #include <malloc.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <signal.h>
+#include <endian.h>
 
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -41,6 +43,7 @@
 
 #define APPLICATIONS_DIR        "/usr/share/applications"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
+#define SETTINGS_FILE           ".config/fehlstart/settings"
 
 #define INITIAL_LAUNCH_LIST_CAPACITY    0xff
 #define INITIAL_STRING_HEAP_CAPACITY    0x4000
@@ -55,14 +58,13 @@
 typedef struct
 {
     char* str;
-    size_t len;
+    uint32_t len;
 } String;
 
 typedef struct
 {
     String file;
     String name;
-    String description;
     String icon;
 } Launch;
 
@@ -71,9 +73,9 @@ typedef struct
     String key;
     union
     {
-        double      d;
-        long long   i;
-        String      s;
+        double  d;
+        int64_t i;
+        String  s;
     } value;
 } Setting;
 
@@ -113,30 +115,23 @@ static Setting settings[NUM_SETTINGS] = {
 //------------------------------------------
 // global variables
 
-static Launch*  launch_list = 0;
-static size_t launch_list_capacity = 0;
-static size_t launch_list_size = 0;
+static Launch* launch_list = 0;
+static uint32_t launch_list_capacity = 0;
+static uint32_t launch_list_size = 0;
 
-static Action*  action_list = 0;
-static size_t action_list_capacity = 0;
-static size_t action_list_size = 0;
+static Action* action_list = 0;
+static uint32_t action_list_capacity = 0;
+static uint32_t action_list_size = 0;
 
 static Action** filter_list = 0;
-static size_t filter_list_capacity = 0;
-static size_t filter_list_size = 0;
-static size_t filter_list_choice = 0;
-
-static char*    string_heap = 0;
-static size_t string_heap_capacity = 0;
-static size_t string_heap_size = 0;
+static uint32_t filter_list_capacity = 0;
+static uint32_t filter_list_size = 0;
+static uint32_t filter_list_choice = 0;
 
 static char input_string[INPUT_STRING_SIZE];
-static size_t input_string_size = 0;
+static uint32_t input_string_size = 0;
 
-// used to track allocated memory
-static size_t heap_size = 0;
-
-// workaround for the focus_out_event dilemma
+// workaround for the focus_out_event bug
 static struct timeval last_hide = {0, 0};
 
 // gtk widgets
@@ -150,14 +145,12 @@ static GtkWidget* input_label = 0;
 
 void* resize_mem(void* old_ptr, size_t size)
 {
-    size_t old_size = (old_ptr != 0) ? malloc_usable_size(old_ptr) : 0;
     void* ptr = realloc(old_ptr, size);
     if (ptr == 0)
     {
         printf("out of memory /o\\\n");
         exit(EXIT_FAILURE);
     }
-    heap_size += malloc_usable_size(ptr) - old_size;
     //~ printf("%p -> %p (%u)\n", old_ptr, ptr, size);
     return ptr;
 }
@@ -170,10 +163,110 @@ void* get_mem(size_t size)
 void free_mem(void* ptr)
 {
     if (ptr != 0)
-    {
-        heap_size -= malloc_usable_size(ptr);
         free(ptr);
+}
+
+//------------------------------------------
+// string functions
+
+String str_make(const char* s)
+{
+    return (s == 0) ?
+        ((String) {"", 0}) :
+        ((String) {(char*)s, strlen(s)});
+}
+
+// ignoring the case
+bool str_ends_with_i(String s, String suffix)
+{
+    uint32_t len = s.len;
+    uint32_t slen = suffix.len;
+    if (slen > len)
+        return false;
+    len -= slen;
+    for (uint32_t i = 0; i < slen; i++)
+        if (tolower(s.str[len + i]) != tolower(suffix.str[i]))
+            return false;
+    return true;
+}
+
+void str_to_lower(String s)
+{
+    for (uint32_t i = 0; i < s.len; i++)
+        s.str[i] = tolower(s.str[i]);
+}
+
+int str_compare_i(String a, String b)
+{
+    for (uint32_t i = 0; i < a.len && i < b.len; i++)
+    {
+        int diff = tolower(a.str[i]) - tolower(b.str[i]);
+        if (diff != 0)
+            return diff;
     }
+    return a.len - b.len;
+}
+
+bool str_equal_i(String a, String b)
+{
+    return str_compare_i(a, b) == 0;
+}
+
+int str_compare(String a, String b)
+{
+    for (uint32_t i = 0; i < a.len && i < b.len; i++)
+    {
+        int diff = a.str[i] - b.str[i];
+        if (diff != 0)
+            return diff;
+    }
+    return a.len - b.len;
+}
+
+bool str_equal(String a, String b)
+{
+    return str_compare(a, b) == 0;
+}
+
+String str_create(uint32_t len)
+{
+    String s = {get_mem(len + 1),  len};
+    memset(s.str, 0, len + 1);
+}
+
+String str_free(String s)
+{
+    // don't free strings that aren't managed by malloc
+    if (malloc_usable_size(s.str) > 0)
+        free_mem(s.str);
+}
+
+// copies a string onto the string heap
+String str_duplicate(String s)
+{
+    String dst = str_create(s.len);
+    uint32_t i = 0;
+    for (; s.str[i] != 0 && i < s.len; i++)
+        dst.str[i] = s.str[i];
+    dst.str[i] = 0;
+    return dst;
+}
+
+// creates a new string that must be freed
+String assemble_path(String prefix, String suffix)
+{
+    String path = str_create(prefix.len + suffix.len + 1);
+
+    strncpy(path.str, prefix.str, prefix.len);
+    if (path.str[prefix.len - 1] != '/')
+        path.str[prefix.len++] = '/';
+
+    strncpy(path.str + prefix.len, suffix.str, suffix.len);
+
+    path.str[prefix.len + suffix.len] = 0;
+    path.len = prefix.len + suffix.len;
+
+    return path;
 }
 
 //------------------------------------------
@@ -198,84 +291,37 @@ off_t get_file_size(String path)
 }
 
 //------------------------------------------
-// string functions
+// file io helpers
 
-String str_make(const char* s)
+void fwrite_32(FILE* file, uint32_t value)
 {
-    return (s == 0) ? ((String) {"", 0}) : ((String) {(char*)s, strlen(s)});
+    value = htole32(value);
+    fwrite(&value, sizeof(uint32_t), 1, file);
 }
 
-// ignoring the case
-bool str_ends_with_i(String s, String suffix)
+uint32_t fread_32(FILE* file)
 {
-    size_t len = s.len;
-    size_t slen = suffix.len;
-    if (slen > len)
-        return false;
-    len -= slen;
-    for (size_t i = 0; i < slen; i++)
-        if (tolower(s.str[len + i]) != tolower(suffix.str[i]))
-            return false;
-    return true;
+    uint32_t value = 0;
+    size_t err = fread(&value, sizeof(uint32_t), 1, file);
+    value = le32toh(value);
+    return (err == 1) ? value : 0;
 }
 
-void str_to_lower(String s)
+void fwrite_str(FILE* file, String str)
 {
-    for (size_t i = 0; i < s.len; i++)
-        s.str[i] = tolower(s.str[i]);
+    fwrite_32(file, str.len);
+    fwrite(str.str, 1, str.len, file);
 }
 
-int str_compare_i(String a, String b)
+String fread_str(FILE* file, char* buffer)
 {
-    for (size_t i = 0; i < a.len && i < b.len; i++)
-    {
-        int diff = tolower(a.str[i]) - tolower(b.str[i]);
-        if (diff != 0)
-            return diff;
-    }
-    return a.len - b.len;
-}
-
-// copies a string onto the string heap
-String str_heap_copy(String s)
-{
-    if (string_heap_size + s.len + 1 > string_heap_capacity)
-    {
-        string_heap_capacity += MAX(s.len + 1, INITIAL_STRING_HEAP_CAPACITY);
-        string_heap = resize_mem(string_heap, string_heap_capacity);
-    }
-    String dst = {string_heap + string_heap_size, s.len};
-
-    size_t i = 0;
-    for (; s.str[i] != 0 && i < s.len; i++)
-        dst.str[i] = s.str[i];
-
-    dst.str[i] = 0;
-    string_heap_size += (i + 1);
-    return dst;
-}
-
-// be careful with this! return value is only valid until next call!
-String assemble_path(String prefix, String suffix)
-{
-    static String buffer = {0, 0};
-
-    size_t size = prefix.len + suffix.len + 2;
-    if (size > buffer.len)
-    {
-        buffer.len = MAX(size, 0xff);
-        buffer.str = resize_mem(buffer.str, buffer.len);
-    }
-
-    strncpy(buffer.str, prefix.str, prefix.len);
-    if (buffer.str[prefix.len - 1] != '/')
-        buffer.str[prefix.len++] = '/';
-
-    strncpy(buffer.str + prefix.len, suffix.str, suffix.len);
-    buffer.str[prefix.len + suffix.len] = 0;
-
-    String s = {buffer.str, prefix.len + suffix.len};
-    return s;
+    uint32_t len = fread_32(file);
+    if (malloc_usable_size(buffer) < len + 1)
+        resize_mem(buffer, len + 1 + 0xff);
+    size_t err = fread(buffer, 1, len, file);
+    buffer[len] = 0;
+    String str = {buffer, len};
+    return (err == len) ?  str : STR_S("");
 }
 
 //------------------------------------------
@@ -306,9 +352,9 @@ bool load_launcher(String file_name, Launch* launcher)
 
     if (used)
     {
-        launcher->file = str_heap_copy(file_name);
+        launcher->file = file_name;
         const char* str = g_app_info_get_name(G_APP_INFO(info));
-        launcher->name = str_heap_copy(STR_D(str));
+        launcher->name = str_duplicate(STR_D(str));
 
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         // if icon is not a full path but ends with file extension...
@@ -319,12 +365,19 @@ bool load_launcher(String file_name, Launch* launcher)
             || str_ends_with_i(icon, STR_S(".svg"))
             || str_ends_with_i(icon, STR_S(".xpm"))))
             icon.len -= 4;
-        launcher->icon = str_heap_copy(icon);
+        launcher->icon = str_duplicate(icon);
         g_free((gpointer)str);
     }
     g_object_unref(G_OBJECT(info));
     g_key_file_free(file);
     return used;
+}
+
+void free_launcher(Launch* launcher)
+{
+    str_free(launcher->file);
+    str_free(launcher->name);
+    str_free(launcher->icon);
 }
 
 void populate_launch_list(String dir_name)
@@ -343,14 +396,23 @@ void populate_launch_list(String dir_name)
             Launch launcher;
             if (load_launcher(full_path, &launcher))
                 add_launcher(&launcher);
+            else
+                str_free(full_path);
         }
     }
     closedir(dir);
 }
 
+void clear_launch_list(void)
+{
+    for (uint32_t i = 0; i < launch_list_size; i++)
+        free_launcher(launch_list + i);
+    launch_list_size = 0;
+}
+
 void update_launch_list(void)
 {
-    launch_list_size = 0;
+    clear_launch_list();
     populate_launch_list(STR_S(APPLICATIONS_DIR));
     char* home = getenv("HOME");
     if (home != 0)
@@ -358,8 +420,8 @@ void update_launch_list(void)
         String home_dir = STR_D(home);
         String user_dir = STR_S(USER_APPLICATIONS_DIR);
         String full_path = assemble_path(home_dir, user_dir);
-        full_path = str_heap_copy(full_path);
         populate_launch_list(full_path);
+        str_free(full_path);
     }
 }
 
@@ -395,19 +457,32 @@ void add_action(Action* action)
     action_list_size++;
 }
 
+void clear_action_list(void)
+{
+    for (uint32_t i = 0; i < action_list_size; i++)
+        str_free(action_list[i].keyword);
+    action_list_size = 0;
+}
+
+int compare_action(const void* a, const void* b)
+{
+    return str_compare(((Action*)a)->keyword, ((Action*)b)->keyword);
+}
+
 void update_action_list(void)
 {
-    action_list_size = 0;
+    clear_action_list();
     for (size_t i = 0; i < launch_list_size; i++)
     {
         Launch* l = launch_list + i;
-        String keyword = str_heap_copy(l->name);
+        String keyword = str_duplicate(l->name);
         str_to_lower(keyword);
         Action action = {l->name, keyword, l->icon, l, launch_action};
         add_action(&action);
     }
     for (size_t i = 0; i < NUM_ACTIONS; i++)
         add_action(actions + i);
+    qsort(action_list, action_list_size, sizeof(Action), compare_action);
 }
 
 void filter_action_list(String filter)
@@ -432,7 +507,6 @@ void filter_action_list(String filter)
 
 void update_action(String command, Action* action)
 {
-    string_heap_size = 0;
     update_launch_list();
     update_action_list();
 }
@@ -449,7 +523,7 @@ void change_selected(int delta)
     }
 }
 
-void run_selected()
+void run_selected(void)
 {
     if (filter_list_size > 0)
     {
@@ -485,7 +559,7 @@ void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
     g_object_unref(icon);
 }
 
-void show_selected()
+void show_selected(void)
 {
     const char* action_text = NO_MATCH_MESSAGE;
     String icon_name = STR_S(NO_MATCH_ICON);
@@ -510,18 +584,24 @@ void show_selected()
     gtk_widget_queue_draw(image);
 }
 
+String get_first_input_word(void)
+{
+    for (uint32_t i = 0;i < input_string_size; i++)
+        if (input_string[i] == ' ')
+            return ((String) {input_string, i});
+    return ((String) {input_string, input_string_size});
+}
+
 void handle_text_input(GdkEventKey* event)
 {
     if (event->keyval == GDK_KEY_BackSpace && input_string_size > 0)
         input_string_size--;
-    else if ((filter_list_size > 1
-        || input_string_size == 0)
-        && event->length == 1
-        && (input_string_size + 1) < INPUT_STRING_SIZE)
+    else if (event->length == 1
+        && (input_string_size + 1) < INPUT_STRING_SIZE
+        && (input_string_size > 0 || event->keyval != GDK_KEY_space))
         input_string[input_string_size++] = tolower(event->keyval);
     input_string[input_string_size] = 0;
-    String str = {input_string, input_string_size};
-    filter_action_list(str);
+    filter_action_list(get_first_input_word());
     filter_list_choice = 0;
 }
 
