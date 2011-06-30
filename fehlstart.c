@@ -220,16 +220,29 @@ String str_substring(String s, uint32_t begin, uint32_t length)
     return ((String) {str, len, false});
 }
 
-// ignoring the case
+bool str_contains(String s, String what)
+{
+    if (what.len > s.len)
+        return false;
+    uint32_t wi = 0;
+    for (uint32_t i = 0; i < s.len; i++)
+        if (s.str[i] == what.str[wi])
+        {
+            wi++;
+            if (wi == what.len)
+                return true;
+        }
+        else
+            wi = 0;
+    return false;
+}
+
 bool str_ends_with_i(String s, String suffix)
 {
-    uint32_t len = s.len;
-    uint32_t slen = suffix.len;
-    if (slen > len)
+    if (s.len < suffix.len)
         return false;
-    len -= slen;
-    for (uint32_t i = 0; i < slen; i++)
-        if (tolower(s.str[len + i]) != tolower(suffix.str[i]))
+    for (uint32_t i = 1; i <= suffix.len; i++)
+        if (tolower(s.str[s.len - i]) != tolower(suffix.str[suffix.len - i]))
             return false;
     return true;
 }
@@ -517,11 +530,8 @@ void filter_action_list(String filter)
 
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++)
-    {
-        String key = action_list[i].keyword;
-        if (strstr(key.str, filter.str) != 0)
+        if (str_contains(action_list[i].keyword, filter))
             filter_list[filter_list_size++] = action_list + i;
-    }
 }
 
 void update_action(String command, Action* action)
