@@ -847,7 +847,7 @@ void clean_up(void)
     clear_launch_list();
     free_mem(launch_list);
 
-    printf("%u bytes not freed\n", heap_size);
+    printf("%u zombie bytes\n", heap_size);
 }
 
 //------------------------------------------
@@ -855,7 +855,7 @@ void clean_up(void)
 
 int main (int argc, char** argv)
 {
-    printf("fehlstart 0.2 (c) 2011 maep\n");
+    printf("fehlstart 0.2.1 (c) 2011 maep\n");
 
     gtk_init(&argc, &argv);
 
