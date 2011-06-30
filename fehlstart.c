@@ -51,14 +51,15 @@
 #define SHOW_IGNORE_TIME                100000
 
 // string "constructor" macros
-#define STR_S(arg) ((String) {(arg), sizeof(arg) - 1})      // for static strings (comile time)
-#define STR_I(arg) {(arg), sizeof(arg) - 1}                 // for initializer (compile time)
-#define STR_D(arg) str_make(arg)                            // for dymanic strings (runtime)
+#define STR_S(arg) ((String) {(arg), sizeof(arg) - 1, false})   // for static strings (comile time)
+#define STR_I(arg) {(arg), sizeof(arg) - 1, false}              // for initializer (compile time)
+#define STR_D(arg) str_wrap(arg)                                // for dymanic strings (runtime)
 
 typedef struct
 {
     char* str;
     uint32_t len;
+    bool can_free;
 } String;
 
 typedef struct
@@ -90,7 +91,6 @@ typedef struct Action_
 
 //------------------------------------------
 // forward declarations
-void block_sigint(void);
 void update_action(String, Action*);
 void quit_action(String, Action*);
 
@@ -143,15 +143,19 @@ static GtkWidget* input_label = 0;
 //------------------------------------------
 // memory functions
 
+static size_t heap_size = 0;
+
 void* resize_mem(void* old_ptr, size_t size)
 {
+    size_t old_size = (old_ptr != 0) ? malloc_usable_size(old_ptr) : 0;
     void* ptr = realloc(old_ptr, size);
     if (ptr == 0)
     {
         printf("out of memory /o\\\n");
         exit(EXIT_FAILURE);
     }
-    //~ printf("%p -> %p (%u)\n", old_ptr, ptr, size);
+    heap_size += - old_size + malloc_usable_size(ptr);
+    // printf("%p -> %p (%u)\n", old_ptr, ptr, size);
     return ptr;
 }
 
@@ -162,18 +166,58 @@ void* get_mem(size_t size)
 
 void free_mem(void* ptr)
 {
-    if (ptr != 0)
-        free(ptr);
+    if (ptr == 0)
+        return;
+    heap_size -= malloc_usable_size(ptr);
+    free(ptr);
 }
 
 //------------------------------------------
 // string functions
 
-String str_make(const char* s)
+String str_wrap(const char* s)
 {
     return (s == 0) ?
-        ((String) {"", 0}) :
-        ((String) {(char*)s, strlen(s)});
+        ((String) {"", 0, false}) :
+        ((String) {(char*)s, strlen(s), false});
+}
+
+String str_wrap_n(const char* s, uint32_t n)
+{
+    return (s == 0) ?
+        ((String) {"", 0, false}) :
+        ((String) {(char*)s, n, false});
+}
+
+String str_create(uint32_t len)
+{
+    String s = {get_mem(len + 1), len, true};
+    memset(s.str, 0, len + 1);
+    return s;
+}
+
+void str_free(String s)
+{
+    if (s.can_free)
+        free_mem(s.str);
+}
+
+// copies a string onto the string heap
+String str_duplicate(String s)
+{
+    String dst = str_create(s.len);
+    uint32_t i = 0;
+    for (; s.str[i] != 0 && i < s.len; i++)
+        dst.str[i] = s.str[i];
+    dst.str[i] = 0;
+    return dst;
+}
+
+String str_substring(String s, uint32_t begin, uint32_t length)
+{
+    char* str = s.str + MIN(begin, s.len);
+    uint32_t len =  MIN(length, s.len - begin);
+    return ((String) {str, len, false});
 }
 
 // ignoring the case
@@ -190,10 +234,11 @@ bool str_ends_with_i(String s, String suffix)
     return true;
 }
 
-void str_to_lower(String s)
+String str_to_lower(String s)
 {
     for (uint32_t i = 0; i < s.len; i++)
         s.str[i] = tolower(s.str[i]);
+    return s;
 }
 
 int str_compare_i(String a, String b)
@@ -226,30 +271,6 @@ int str_compare(String a, String b)
 bool str_equal(String a, String b)
 {
     return str_compare(a, b) == 0;
-}
-
-String str_create(uint32_t len)
-{
-    String s = {get_mem(len + 1),  len};
-    memset(s.str, 0, len + 1);
-}
-
-String str_free(String s)
-{
-    // don't free strings that aren't managed by malloc
-    if (malloc_usable_size(s.str) > 0)
-        free_mem(s.str);
-}
-
-// copies a string onto the string heap
-String str_duplicate(String s)
-{
-    String dst = str_create(s.len);
-    uint32_t i = 0;
-    for (; s.str[i] != 0 && i < s.len; i++)
-        dst.str[i] = s.str[i];
-    dst.str[i] = 0;
-    return dst;
 }
 
 // creates a new string that must be freed
@@ -313,15 +334,13 @@ void fwrite_str(FILE* file, String str)
     fwrite(str.str, 1, str.len, file);
 }
 
-String fread_str(FILE* file, char* buffer)
+String fread_str(FILE* file)
 {
     uint32_t len = fread_32(file);
-    if (malloc_usable_size(buffer) < len + 1)
-        resize_mem(buffer, len + 1 + 0xff);
-    size_t err = fread(buffer, 1, len, file);
-    buffer[len] = 0;
-    String str = {buffer, len};
-    return (err == len) ?  str : STR_S("");
+    String s = str_create(len);
+    size_t err = fread(s.str, 1, len, file);
+    s.str[len] = 0;
+    return (err == len) ?  s : STR_S("");
 }
 
 //------------------------------------------
@@ -588,8 +607,8 @@ String get_first_input_word(void)
 {
     for (uint32_t i = 0;i < input_string_size; i++)
         if (input_string[i] == ' ')
-            return ((String) {input_string, i});
-    return ((String) {input_string, input_string_size});
+            return str_wrap_n(input_string, i);
+    return str_wrap_n(input_string, input_string_size);
 }
 
 void handle_text_input(GdkEventKey* event)
@@ -809,6 +828,18 @@ String detect_desktop_environment()
     return desktop;
 }
 
+// helps to find leaks
+void clean_up(void)
+{
+    clear_action_list();
+    free_mem(action_list);
+    free_mem(filter_list);
+    clear_launch_list();
+    free_mem(launch_list);
+
+    printf("%u bytes not freed\n", heap_size);
+}
+
 //------------------------------------------
 // put it all to gether
 
@@ -832,5 +863,6 @@ int main (int argc, char** argv)
     printf("ready, hit win + space to get started.\n");
     gtk_main();
 
+    clean_up();
     return EXIT_SUCCESS;
 }
