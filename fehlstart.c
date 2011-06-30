@@ -821,7 +821,7 @@ String detect_desktop_environment()
     char* session = getenv("DESKTOP_SESSION");
     char* xdg_prefix = getenv("XDG_MENU_PREFIX");
     session = session ? : "";
-    xdg_prefix = (xdg_prefix == 0) ? "" : xdg_prefix;
+    xdg_prefix = xdg_prefix ? "";
 
     String desktop = STR_S("Old");
     if (kde0 != 0 || kde1 != 0 || strstr(session, "kde") != 0)
@@ -834,7 +834,7 @@ String detect_desktop_environment()
     //~ LXDE	LXDE Desktop
     //~ ROX	    ROX Desktop
     //~ Unity	Unity Shell
-    printf("guessing desktop environment: %s\n", desktop.str);
+    printf("detected desktop: %s\n", desktop.str);
     return desktop;
 }
 
