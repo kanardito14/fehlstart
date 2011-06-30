@@ -821,7 +821,7 @@ String detect_desktop_environment()
     char* session = getenv("DESKTOP_SESSION");
     char* xdg_prefix = getenv("XDG_MENU_PREFIX");
     session = session ? : "";
-    xdg_prefix = xdg_prefix ? "";
+    xdg_prefix = xdg_prefix ? : "";
 
     String desktop = STR_S("Old");
     if (kde0 != 0 || kde1 != 0 || strstr(session, "kde") != 0)
