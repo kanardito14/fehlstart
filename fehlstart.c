@@ -8,7 +8,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -16,7 +15,6 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <signal.h>
-#include <endian.h>
 
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -32,22 +30,20 @@
 #define WELCOME_MESSAGE     "type something"
 #define NO_MATCH_MESSAGE    "no match"
 
-#define TRIGGER_KEY     GDK_space
-#define TRIGGER_MOD     GDK_MOD4_MASK // MOD1 is alt, CONTROL is control
+#define TRIGGER_KEY         GDK_space
+#define TRIGGER_MOD         GDK_MOD4_MASK // MOD1 is alt, CONTROL is control
 
-#define WINDOW_WIDTH    200
-#define WINDOW_HEIGHT   100
-#define DEFAULT_ICON    GTK_STOCK_FIND
-#define NO_MATCH_ICON   GTK_STOCK_DIALOG_QUESTION
-#define ICON_SIZE       GTK_ICON_SIZE_DIALOG
+#define WINDOW_WIDTH        200
+#define WINDOW_HEIGHT       100
+#define DEFAULT_ICON        GTK_STOCK_FIND
+#define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
+#define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 
-#define APPLICATIONS_DIR        "/usr/share/applications"
-#define USER_APPLICATIONS_DIR   ".local/share/applications"
-#define SETTINGS_FILE           ".config/fehlstart/settings"
+#define APPLICATIONS_DIR                "/usr/share/applications"
+#define USER_APPLICATIONS_DIR           ".local/share/applications"
 
 #define INITIAL_LAUNCH_LIST_CAPACITY    0xff
-#define INITIAL_STRING_HEAP_CAPACITY    0x4000
-#define INPUT_STRING_SIZE               0xff
+#define INPUT_STRING_SIZE               0x80
 #define SHOW_IGNORE_TIME                100000
 
 // string "constructor" macros
@@ -69,17 +65,6 @@ typedef struct
     String icon;
 } Launch;
 
-typedef struct
-{
-    String key;
-    union
-    {
-        double  d;
-        int64_t i;
-        String  s;
-    } value;
-} Setting;
-
 typedef struct Action_
 {
     String label;
@@ -95,24 +80,14 @@ void update_action(String, Action*);
 void quit_action(String, Action*);
 
 //------------------------------------------
-// actions
+// build-in actions
 
 #define NUM_ACTIONS 2
 static Action actions[NUM_ACTIONS] = {
     {STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I(GTK_STOCK_REFRESH), 0 , update_action},
     {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(GTK_STOCK_QUIT), 0, quit_action}
-    };
+};
 
-// settings
-#define SHOW_ICON 2
-#define NUM_SETTINGS 3
-static Setting settings[NUM_SETTINGS] = {
-    {STR_I("s_browser"), {.s = STR_I("x-www-browser")}},
-    {STR_I("s_terminal"), {.s = STR_I("x-terminal-emulator")}},
-    {STR_I("b_show_icon"), {.i = 1}}
-    };
-
-//------------------------------------------
 // global variables
 
 static Launch* launch_list = 0;
@@ -140,47 +115,11 @@ static GtkWidget* image = 0;
 static GtkWidget* action_label = 0;
 static GtkWidget* input_label = 0;
 
-//------------------------------------------
-// memory functions
-
-static size_t heap_size = 0;
-
-void* resize_mem(void* old_ptr, size_t size)
-{
-    size_t old_size = (old_ptr != 0) ? malloc_usable_size(old_ptr) : 0;
-    void* ptr = realloc(old_ptr, size);
-    if (ptr == 0)
-    {
-        printf("out of memory /o\\\n");
-        exit(EXIT_FAILURE);
-    }
-    heap_size += - old_size + malloc_usable_size(ptr);
-    // printf("%p -> %p (%u)\n", old_ptr, ptr, size);
-    return ptr;
-}
-
-void* get_mem(size_t size)
-{
-    return resize_mem(0, size);
-}
-
-void free_mem(void* ptr)
-{
-    if (ptr == 0)
-        return;
-    heap_size -= malloc_usable_size(ptr);
-    free(ptr);
-}
+static bool conf_show_icon = true;
+static bool conf_one_time = false;
 
 //------------------------------------------
 // string functions
-
-String str_wrap(const char* s)
-{
-    return (s == 0) ?
-        ((String) {"", 0, false}) :
-        ((String) {(char*)s, strlen(s), false});
-}
 
 String str_wrap_n(const char* s, uint32_t n)
 {
@@ -189,9 +128,14 @@ String str_wrap_n(const char* s, uint32_t n)
         ((String) {(char*)s, n, false});
 }
 
+String str_wrap(const char* s)
+{
+    return str_wrap_n(s, strlen(s));
+}
+
 String str_create(uint32_t len)
 {
-    String s = {get_mem(len + 1), len, true};
+    String s = {malloc(len + 1), len, true};
     memset(s.str, 0, len + 1);
     return s;
 }
@@ -199,10 +143,9 @@ String str_create(uint32_t len)
 void str_free(String s)
 {
     if (s.can_free)
-        free_mem(s.str);
+        free(s.str);
 }
 
-// copies a string onto the string heap
 String str_duplicate(String s)
 {
     String dst = str_create(s.len);
@@ -216,8 +159,8 @@ String str_duplicate(String s)
 String str_substring(String s, uint32_t begin, uint32_t length)
 {
     char* str = s.str + MIN(begin, s.len);
-    uint32_t len =  MIN(length, s.len - begin);
-    return ((String) {str, len, false});
+    uint32_t len = MIN(length, s.len - begin);
+    return str_wrap_n(str, len);
 }
 
 bool str_contains(String s, String what)
@@ -226,14 +169,11 @@ bool str_contains(String s, String what)
         return false;
     uint32_t wi = 0;
     for (uint32_t i = 0; i < s.len; i++)
-        if (s.str[i] == what.str[wi])
-        {
-            wi++;
-            if (wi == what.len)
-                return true;
-        }
-        else
-            wi = 0;
+    {
+        wi = (s.str[i] == what.str[wi]) ? wi + 1 : 0;
+        if (wi == what.len)
+            return true;
+    }
     return false;
 }
 
@@ -325,48 +265,16 @@ off_t get_file_size(String path)
 }
 
 //------------------------------------------
-// file io helpers
-
-void fwrite_32(FILE* file, uint32_t value)
-{
-    value = htole32(value);
-    fwrite(&value, sizeof(uint32_t), 1, file);
-}
-
-uint32_t fread_32(FILE* file)
-{
-    uint32_t value = 0;
-    size_t err = fread(&value, sizeof(uint32_t), 1, file);
-    value = le32toh(value);
-    return (err == 1) ? value : 0;
-}
-
-void fwrite_str(FILE* file, String str)
-{
-    fwrite_32(file, str.len);
-    fwrite(str.str, 1, str.len, file);
-}
-
-String fread_str(FILE* file)
-{
-    uint32_t len = fread_32(file);
-    String s = str_create(len);
-    size_t err = fread(s.str, 1, len, file);
-    s.str[len] = 0;
-    return (err == len) ?  s : STR_S("");
-}
-
-//------------------------------------------
 // launcher function
 
-void add_launcher(Launch* launch)
+void add_launcher(Launch launch)
 {
     if (launch_list_size + 1 > launch_list_capacity)
     {
         launch_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
-        launch_list = resize_mem(launch_list, launch_list_capacity * sizeof(Launch));
+        launch_list = realloc(launch_list, launch_list_capacity * sizeof(Launch));
     }
-    launch_list[launch_list_size] = *launch;
+    launch_list[launch_list_size] = launch;
     launch_list_size++;
 }
 
@@ -427,7 +335,7 @@ void populate_launch_list(String dir_name)
             String full_path = assemble_path(dir_name, file_name);
             Launch launcher;
             if (load_launcher(full_path, &launcher))
-                add_launcher(&launcher);
+                add_launcher(launcher);
             else
                 str_free(full_path);
         }
@@ -483,7 +391,7 @@ void add_action(Action* action)
     if (action_list_size + 1 > action_list_capacity)
     {
         action_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
-        action_list = resize_mem(action_list, action_list_capacity * sizeof(Action));
+        action_list = realloc(action_list, action_list_capacity * sizeof(Action));
     }
     action_list[action_list_size] = *action;
     action_list_size++;
@@ -525,7 +433,7 @@ void filter_action_list(String filter)
     if (filter_list_capacity < action_list_capacity)
     {
         filter_list_capacity = action_list_capacity;
-        filter_list = resize_mem(filter_list, filter_list_capacity * sizeof(Action*));
+        filter_list = realloc(filter_list, filter_list_capacity * sizeof(Action*));
     }
 
     filter_list_size = 0;
@@ -570,7 +478,7 @@ void run_selected(void)
 
 void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
 {
-    if (!settings[SHOW_ICON].value.i)
+    if (!conf_show_icon)
         return;
 
     GIcon* icon = 0;
@@ -636,7 +544,12 @@ void handle_text_input(GdkEventKey* event)
 
 void hide_window(void)
 {
-    if (gtk_widget_get_visible(window))
+    if (!gtk_widget_get_visible(window))
+        return;
+
+    if (conf_one_time) // configured for one-time use
+        gtk_main_quit();
+    else
     {
         gtk_widget_hide(window);
         input_string[0] = 0;
@@ -699,24 +612,24 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
     {
         case GDK_KEY_Escape:
             hide_window();
-            break;
+        break;
         case GDK_KEY_Return:
             run_selected();
             hide_window();
-            break;
+        break;
         case GDK_KEY_Up:
             change_selected(-1);
             show_selected();
-            break;
+        break;
         case GDK_KEY_Tab:
         case GDK_KEY_Down:
             change_selected(1);
             show_selected();
-            break;
+        break;
         default:
             handle_text_input(event);
             show_selected();
-            break;
+        break;
     }
     return true;
 }
@@ -757,8 +670,7 @@ void register_hotkey(guint key, guint mask, void (*callback)(void))
     size_t numlockmask = 0;
     for (size_t i = 0; i < 8; i++)
         for (size_t j = 0; j < modmap->max_keypermod; j++)
-            if (modmap->modifiermap[i * modmap->max_keypermod + j]
-                == XKeysymToKeycode(disp, XK_Num_Lock))
+            if (modmap->modifiermap[i * modmap->max_keypermod + j] == XKeysymToKeycode(disp, XK_Num_Lock))
                 numlockmask = (1 << i);
     XFreeModifiermap(modmap);
 
@@ -768,6 +680,7 @@ void register_hotkey(guint key, guint mask, void (*callback)(void))
         XGrabKey(disp, keycode, numlockmask | LockMask | mask, win, False, GrabModeAsync, GrabModeAsync);
     }
     gdk_window_add_filter(rootwin, gdk_filter, callback);
+    printf("hit win + space to show window\n");
 }
 
 //------------------------------------------
@@ -806,13 +719,13 @@ void create_widgets(void)
     gtk_widget_show(input_label);
 }
 
-int change_to_home_dir(void) // to stop gcc from bitching about ignored return value
+// stop gcc from bitching about ignored return value
+int change_to_home_dir(void)
 {
-    int err = chdir(getenv("HOME"));
-    return err;
+    return chdir(getenv("HOME"));
 }
 
-String detect_desktop_environment()
+String detect_desktop_environment(void)
 {
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
@@ -838,41 +751,51 @@ String detect_desktop_environment()
     return desktop;
 }
 
-// helps to find leaks
-void clean_up(void)
+void parse_commandline(int argc, char** argv)
 {
-    clear_action_list();
-    free_mem(action_list);
-    free_mem(filter_list);
-    clear_launch_list();
-    free_mem(launch_list);
-
-    printf("%u zombie bytes\n", heap_size);
+    for (int i = 1; i < argc; i++)
+    {
+        if (!strcmp(argv[i], "--one-way"))
+            conf_one_time = true;
+        else if (!strcmp(argv[i], "--no-icon"))
+            conf_show_icon = false;
+        else if (!strcmp(argv[i], "--help"))
+        {
+            printf("options:\n\t--one-way\texit after one use\n"
+                "\t--no-icon\tdisable icon\n");
+            exit(EXIT_SUCCESS);
+        }
+        else
+            printf("invalid option: %s\n", argv[i]);
+    }
 }
 
 //------------------------------------------
-// put it all to gether
+// main
 
 int main (int argc, char** argv)
 {
-    printf("fehlstart 0.2.1 (c) 2011 maep\n");
+    printf("fehlstart 0.2.2 (c) 2011 maep\n");
 
     gtk_init(&argc, &argv);
+    parse_commandline(argc, argv);
 
     String de = detect_desktop_environment();
     g_desktop_app_info_set_desktop_env(de.str);
+
+    change_to_home_dir();
+    signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
 
     update_launch_list();
     update_action_list();
     create_widgets();
 
-    change_to_home_dir();
-    signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
-    register_hotkey(TRIGGER_KEY, TRIGGER_MOD, toggle_window);
+    if (conf_one_time) // configured for one-time use
+        show_window();
+    else
+        register_hotkey(TRIGGER_KEY, TRIGGER_MOD, toggle_window);
 
-    printf("ready, hit win + space to get started.\n");
     gtk_main();
 
-    clean_up();
     return EXIT_SUCCESS;
 }
