@@ -164,12 +164,20 @@ bool load_launcher(String file_name, Launch* launcher)
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         // if icon is not a full path but ends with file extension...
         // the skype package does this, and icon lookup works only without the .png
-        String icon = STR_D(str);
-        if (!g_path_is_absolute(icon.str)
-            && (str_ends_with_i(icon, STR_S(".png"))
-            || str_ends_with_i(icon, STR_S(".svg"))
-            || str_ends_with_i(icon, STR_S(".xpm"))))
-            icon.len -= 4;
+        String icon;
+        if (str)
+        {
+            icon = STR_D(str);
+            if (!g_path_is_absolute(icon.str)
+                && (str_ends_with_i(icon, STR_S(".png"))
+                || str_ends_with_i(icon, STR_S(".svg"))
+                || str_ends_with_i(icon, STR_S(".xpm"))))
+                icon.len -= 4;
+        }
+        else
+        {
+            icon = STR_D("applications-other");
+        }
         launcher->icon = str_duplicate(icon);
         g_free((gpointer)str);
     }
@@ -332,7 +340,7 @@ void run_selected(void)
         Action* action = filter_list[filter_list_choice];
         if (action->action != 0)
         {
-            String str = {input_string, input_string_size};
+            String str = {input_string, input_string_size, FALSE};
             action->action(str, action);
         }
     }
