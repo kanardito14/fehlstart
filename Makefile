@@ -7,10 +7,10 @@ PKGS := gtk+-2.0 gio-unix-2.0
 INCS := $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS))
 
-CFLAGS	:= -Wall -Wextra -std=gnu99 -I. $(INCS) $(CFLAGS)
+CFLAGS	:= -g -Wall -Wextra -std=gnu99 $(INCS) $(CFLAGS)
 LDFLAGS	:= $(LIBS) $(LDFLAGS)
 
-SRCS := fehlstart.c
+SRCS := $(wildcard *.c)
 OBJS := $(SRCS:.c=.o)
 all: fehlstart
 
