@@ -33,7 +33,7 @@
 #define NO_MATCH_MESSAGE    "no match"
 
 #define TRIGGER_KEY         GDK_space
-#define TRIGGER_MOD         GDK_MOD4_MASK // MOD1 is alt, CONTROL is control
+#define TRIGGER_MOD         GDK_MOD1_MASK // MOD1 is alt, CONTROL is control
 
 #define WINDOW_WIDTH        200
 #define WINDOW_HEIGHT       100
@@ -80,15 +80,15 @@ static Action actions[NUM_ACTIONS] = {
 
 // global variables
 
-static Launch* launch_list = 0;
+static Launch* launch_list = NULL;
 static uint32_t launch_list_capacity = 0;
 static uint32_t launch_list_size = 0;
 
-static Action* action_list = 0;
+static Action* action_list = NULL;
 static uint32_t action_list_capacity = 0;
 static uint32_t action_list_size = 0;
 
-static Action** filter_list = 0;
+static Action** filter_list = NULL;
 static uint32_t filter_list_capacity = 0;
 static uint32_t filter_list_size = 0;
 static uint32_t filter_list_choice = 0;
@@ -563,6 +563,8 @@ void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_default_size(GTK_WINDOW(window), WINDOW_WIDTH, WINDOW_HEIGHT);
+    gtk_window_set_resizable(GTK_WINDOW(window), false);
+    gtk_window_set_keep_above(GTK_WINDOW(window), true);
     gtk_window_set_decorated(GTK_WINDOW(window), false);
     gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), true);
     gtk_window_set_skip_pager_hint(GTK_WINDOW(window), true);
