@@ -80,8 +80,6 @@ static Action actions[NUM_ACTIONS] = {
 
 // global variables
 
-const char *hotkey = "<Ctrl>space";
-
 static Launch* launch_list = NULL;
 static uint32_t launch_list_capacity = 0;
 static uint32_t launch_list_size = 0;
