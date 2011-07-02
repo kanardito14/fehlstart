@@ -33,7 +33,7 @@
 #define NO_MATCH_MESSAGE    "no match"
 
 #define TRIGGER_KEY         GDK_space
-#define TRIGGER_MOD         GDK_MOD1_MASK // MOD1 is alt, CONTROL is control
+#define TRIGGER_MOD         GDK_MOD4_MASK // MOD1 is alt, CONTROL is control
 
 #define WINDOW_WIDTH        200
 #define WINDOW_HEIGHT       100
