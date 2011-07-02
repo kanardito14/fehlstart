@@ -6,8 +6,8 @@
 */
 
 #include <ctype.h>
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -24,16 +24,16 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #include <gdk/gdkkeysyms.h>
+#include <glib/gstdio.h>
 #include <gio/gdesktopappinfo.h>
+
+#include <keybinder.h>
 
 #include "string.h"
 
 // macros
 #define WELCOME_MESSAGE     "type something"
 #define NO_MATCH_MESSAGE    "no match"
-
-#define TRIGGER_KEY         GDK_space
-#define TRIGGER_MOD         GDK_MOD4_MASK // MOD1 is alt, CONTROL is control
 
 #define WINDOW_WIDTH        200
 #define WINDOW_HEIGHT       100
@@ -79,6 +79,8 @@ static Action actions[NUM_ACTIONS] = {
 };
 
 // global variables
+
+const char *hotkey = "<Ctrl>space";
 
 static Launch* launch_list = NULL;
 static uint32_t launch_list_capacity = 0;
@@ -450,7 +452,7 @@ void show_window(void)
     }
 }
 
-void toggle_window(void)
+void toggle_window(const char *keystring, void *data)
 {
     if (gtk_widget_get_visible(window))
         hide_window();
@@ -528,32 +530,28 @@ int xerror_handler(Display* display, XErrorEvent* event)
     return 0;
 }
 
-void register_hotkey(guint key, guint mask, void (*callback)(void))
+void register_hotkey(void (*callback)(const char*, void*))
 {
-    GdkWindow* rootwin = gdk_get_default_root_window();
-    Display* disp = GDK_WINDOW_XDISPLAY(rootwin);
-    Window win = GDK_WINDOW_XWINDOW(rootwin);
-    KeyCode keycode = XKeysymToKeycode(disp, key);
-
-    XSetErrorHandler(xerror_handler);
-    XGrabKey(disp, keycode, mask, win, False, GrabModeAsync, GrabModeAsync);
-    XGrabKey(disp, keycode, LockMask | mask, win, False, GrabModeAsync, GrabModeAsync);
-
-    XModifierKeymap* modmap = XGetModifierMapping(disp);
-    size_t numlockmask = 0;
-    for (size_t i = 0; i < 8; i++)
-        for (size_t j = 0; j < modmap->max_keypermod; j++)
-            if (modmap->modifiermap[i * modmap->max_keypermod + j] == XKeysymToKeycode(disp, XK_Num_Lock))
-                numlockmask = (1 << i);
-    XFreeModifiermap(modmap);
-
-    if (numlockmask != 0)
-    {
-        XGrabKey(disp, keycode, numlockmask | mask, win, False, GrabModeAsync, GrabModeAsync);
-        XGrabKey(disp, keycode, numlockmask | LockMask | mask, win, False, GrabModeAsync, GrabModeAsync);
+    GError *error = NULL;
+    GKeyFile *keyfile = g_key_file_new();
+    const gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart",
+                                             NULL);
+    g_mkdir_with_parents(conf_dir, 0700);
+    const gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
+    FILE *fp = fopen(conf_file, "r");
+    if (!fp) {
+        fp = fopen(conf_file, "w");
+        fputs("[Bindings]\nlaunch=<Super>space\n", fp);
     }
-    gdk_window_add_filter(rootwin, gdk_filter, callback);
-    printf("hit win + space to show window\n");
+    fclose(fp);
+    g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, &error);
+    
+    gchar *hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", &error);
+    keybinder_init();
+    keybinder_bind(hotkey, callback, NULL);
+    printf("hit %s to show window\n", hotkey);
+    
+    g_key_file_free(keyfile);
 }
 
 //------------------------------------------
@@ -668,7 +666,7 @@ int main (int argc, char** argv)
     if (conf_one_time) // configured for one-time use
         show_window();
     else
-        register_hotkey(TRIGGER_KEY, TRIGGER_MOD, toggle_window);
+        register_hotkey(toggle_window);
 
     gtk_main();
 
