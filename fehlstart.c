@@ -1,8 +1,7 @@
 /*
 *   fehlstart - a small launcher written in gnu c99
 *   this source is publieshed under the GPLv3 license.
-*   copyright 2011 by maep
-*   build: gcc fehlstart.c -o fehlstart -std=gnu99 `pkg-config --cflags --libs gtk+-2.0`
+*   copyright 2011 maep
 */
 
 #include <ctype.h>
@@ -105,6 +104,7 @@ static GtkWidget* image = 0;
 static GtkWidget* action_label = 0;
 static GtkWidget* input_label = 0;
 
+// options
 static bool conf_show_icon = true;
 static bool conf_one_time = false;
 
@@ -123,10 +123,12 @@ bool is_directory(String path)
     return stat(path.str, &s) == 0 ? S_ISDIR(s.st_mode) : false;
 }
 
-off_t get_file_size(String path)
+const char* get_home_dir(void)
 {
-    struct stat s;
-    return stat(path.str, &s) == 0 ? s.st_size : 0;
+     const char* home = getenv("HOME");
+     if (!home)
+        home = g_get_home_dir();
+    return home;
 }
 
 //------------------------------------------
@@ -162,21 +164,17 @@ bool load_launcher(String file_name, Launch* launcher)
         launcher->name = str_duplicate(STR_D(str));
 
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        // if icon is not a full path but ends with file extension...
-        // the skype package does this, and icon lookup works only without the .png
-        String icon;
+        String icon = STR_D("applications-other");
         if (str)
         {
+            // if icon is not a full path but ends with file extension...
+            // the skype package does this, and icon lookup works only without the .png
             icon = STR_D(str);
             if (!g_path_is_absolute(icon.str)
                 && (str_ends_with_i(icon, STR_S(".png"))
                 || str_ends_with_i(icon, STR_S(".svg"))
                 || str_ends_with_i(icon, STR_S(".xpm"))))
                 icon.len -= 4;
-        }
-        else
-        {
-            icon = STR_D("applications-other");
         }
         launcher->icon = str_duplicate(icon);
         g_free((gpointer)str);
@@ -227,13 +225,14 @@ void update_launch_list(void)
 {
     clear_launch_list();
     populate_launch_list(STR_S(APPLICATIONS_DIR));
-    char* home = getenv("HOME");
+    const char* home = get_home_dir();
     if (home != 0)
     {
         String home_dir = STR_D(home);
         String user_dir = STR_S(USER_APPLICATIONS_DIR);
         String full_path = assemble_path(home_dir, user_dir);
-        populate_launch_list(full_path);
+        if (is_directory(full_path))
+            populate_launch_list(full_path);
         str_free(full_path);
     }
 }
@@ -543,12 +542,12 @@ void register_hotkey(void (*callback)(const char*, void*))
     }
     fclose(fp);
     g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, &error);
-    
+
     gchar *hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", &error);
     keybinder_init();
     keybinder_bind(hotkey, callback, NULL);
     printf("hit %s to show window\n", hotkey);
-    
+
     g_key_file_free(keyfile);
 }
 
@@ -588,12 +587,6 @@ void create_widgets(void)
     input_label = gtk_label_new("");
     gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
     gtk_widget_show(input_label);
-}
-
-// stop gcc from bitching about ignored return value
-int change_to_home_dir(void)
-{
-    return chdir(getenv("HOME"));
 }
 
 String detect_desktop_environment(void)
@@ -654,7 +647,7 @@ int main (int argc, char** argv)
     String de = detect_desktop_environment();
     g_desktop_app_info_set_desktop_env(de.str);
 
-    change_to_home_dir();
+    g_chdir(get_home_dir());
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
 
     update_launch_list();
