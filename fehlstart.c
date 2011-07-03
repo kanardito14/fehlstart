@@ -444,7 +444,7 @@ void show_window(void)
     if (!x11_sucks && !gtk_widget_get_visible(window))
     {
         show_selected();
-        gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
+        gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
         gtk_window_present(GTK_WINDOW(window));
         gtk_window_set_keep_above(GTK_WINDOW(window), true);
     }
