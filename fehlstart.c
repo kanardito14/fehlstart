@@ -557,7 +557,7 @@ void register_hotkey(void (*callback)(const char*, void*))
 void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_default_size(GTK_WINDOW(window), WINDOW_WIDTH, WINDOW_HEIGHT);
+    gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
     gtk_window_set_keep_above(GTK_WINDOW(window), true);
     gtk_window_set_decorated(GTK_WINDOW(window), false);
