@@ -80,6 +80,15 @@ static Action actions[NUM_ACTIONS] = {
 
 // global variables
 
+// preferences
+struct
+{
+    gchar *hotkey;
+    bool strict_matching;
+    guint64 update_timeout;
+} prefs;
+
+// launcher stuff
 static Launch* launch_list = NULL;
 static uint32_t launch_list_capacity = 0;
 static uint32_t launch_list_size = 0;
@@ -530,30 +539,59 @@ int xerror_handler(Display* display, XErrorEvent* event)
 
 void register_hotkey(void (*callback)(const char*, void*))
 {
-    GError *error = NULL;
-    GKeyFile *keyfile = g_key_file_new();
-    const gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart",
-                                             NULL);
-    g_mkdir_with_parents(conf_dir, 0700);
-    const gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
-    FILE *fp = fopen(conf_file, "r");
-    if (!fp) {
-        fp = fopen(conf_file, "w");
-        fputs("[Bindings]\nlaunch=<Super>space\n", fp);
-    }
-    fclose(fp);
-    g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, &error);
-    
-    gchar *hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", &error);
     keybinder_init();
-    keybinder_bind(hotkey, callback, NULL);
-    printf("hit %s to show window\n", hotkey);
-    
-    g_key_file_free(keyfile);
+    keybinder_bind(prefs.hotkey, callback, NULL);
+    printf("hit %s to show window\n", prefs.hotkey);
 }
 
 //------------------------------------------
 // misc
+
+void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
+{
+    g_mkdir_with_parents(conf_dir, 0700);
+    FILE *fp = fopen(conf_file, "r");
+    if (!fp) {
+        fp = fopen(conf_file, "w");
+        fputs("[Bindings]\nlaunch=<Super>space\n", fp);
+        fputs("[Update]\ninterval=15\n", fp);
+        fputs("[Matching]\nstrict=true\n", fp);
+    }
+    fclose(fp);
+}
+
+void read_config(const gchar *conf_file)
+{
+    // Don't actually care about errors yet, so just set it to null each time
+    GError *error = NULL;
+    GKeyFile *keyfile = g_key_file_new();
+    g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, &error);
+    
+    prefs.hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", &error);
+    error = NULL;
+    prefs.strict_matching = g_key_file_get_boolean(keyfile, "Matching", "strict",
+                                                   &error);
+    error = NULL;
+    prefs.update_timeout = g_key_file_get_uint64(keyfile, "Update", "interval",
+                                                 &error);
+    
+    g_key_file_free(keyfile);
+}
+
+// gets run periodically
+bool update_lists_cb(void *data)
+{
+    update_launch_list();
+    update_action_list();
+    return true;
+}
+
+void run_updates(void)
+{
+    if (prefs.update_timeout)
+        g_timeout_add_seconds(60 * prefs.update_timeout,
+                              (GSourceFunc) update_lists_cb, NULL);
+}
 
 void create_widgets(void)
 {
@@ -650,13 +688,19 @@ int main (int argc, char** argv)
 
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
-
+    
     String de = detect_desktop_environment();
     g_desktop_app_info_set_desktop_env(de.str);
-
+    
     change_to_home_dir();
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
-
+    
+    gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
+    
+    create_config_if_nonexistent(conf_dir, conf_file);
+    read_config(conf_file);
+    
     update_launch_list();
     update_action_list();
     create_widgets();
@@ -665,7 +709,9 @@ int main (int argc, char** argv)
         show_window();
     else
         register_hotkey(toggle_window);
-
+        
+    run_updates();
+    
     gtk_main();
 
     return EXIT_SUCCESS;
