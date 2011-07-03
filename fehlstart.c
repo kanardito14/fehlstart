@@ -34,6 +34,7 @@
 #define WELCOME_MESSAGE     "type something"
 #define NO_MATCH_MESSAGE    "no match"
 
+#define DEFAULT_HOTKEY      "<Super>space"
 #define WINDOW_WIDTH        200
 #define WINDOW_HEIGHT       100
 #define DEFAULT_ICON        GTK_STOCK_FIND
@@ -105,22 +106,23 @@ static GtkWidget* action_label = 0;
 static GtkWidget* input_label = 0;
 
 // options
+static const char* conf_hotkey = DEFAULT_HOTKEY;
 static bool conf_show_icon = true;
 static bool conf_one_time = false;
 
 //------------------------------------------
 // filesystem helpers
 
-bool is_file(String path)
+bool is_file(const char* path)
 {
     struct stat s;
-    return stat(path.str, &s) == 0 ? S_ISREG(s.st_mode) : false;
+    return stat(path, &s) == 0 ? S_ISREG(s.st_mode) : false;
 }
 
-bool is_directory(String path)
+bool is_directory(const char* path)
 {
     struct stat s;
-    return stat(path.str, &s) == 0 ? S_ISDIR(s.st_mode) : false;
+    return stat(path, &s) == 0 ? S_ISDIR(s.st_mode) : false;
 }
 
 const char* get_home_dir(void)
@@ -231,7 +233,7 @@ void update_launch_list(void)
         String home_dir = STR_D(home);
         String user_dir = STR_S(USER_APPLICATIONS_DIR);
         String full_path = assemble_path(home_dir, user_dir);
-        if (is_directory(full_path))
+        if (is_directory(full_path.str))
             populate_launch_list(full_path);
         str_free(full_path);
     }
@@ -527,30 +529,6 @@ int xerror_handler(Display* display, XErrorEvent* event)
     return 0;
 }
 
-void register_hotkey(void (*callback)(const char*, void*))
-{
-    GError *error = NULL;
-    GKeyFile *keyfile = g_key_file_new();
-    const gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart",
-                                             NULL);
-    g_mkdir_with_parents(conf_dir, 0700);
-    const gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
-    FILE *fp = fopen(conf_file, "r");
-    if (!fp) {
-        fp = fopen(conf_file, "w");
-        fputs("[Bindings]\nlaunch=<Super>space\n", fp);
-    }
-    fclose(fp);
-    g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, &error);
-
-    gchar *hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", &error);
-    keybinder_init();
-    keybinder_bind(hotkey, callback, NULL);
-    printf("hit %s to show window\n", hotkey);
-
-    g_key_file_free(keyfile);
-}
-
 //------------------------------------------
 // misc
 
@@ -634,14 +612,42 @@ void parse_commandline(int argc, char** argv)
     }
 }
 
+void read_config_file(void)
+{
+    const gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    const gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
+
+    if (!is_directory(conf_dir) || !is_file(conf_file))
+    {
+        g_mkdir_with_parents(conf_dir, 0700);
+        FILE *fp = fopen(conf_file, "w");
+        if (fp)
+        {
+            fputs("[Bindings]\nlaunch=<Super>space\n", fp);
+            fclose(fp);
+        }
+    }
+
+    GKeyFile *keyfile = g_key_file_new();
+    if (g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, NULL))
+    {
+        const gchar* str = g_key_file_get_string(keyfile, "Bindings", "launch", NULL);
+        conf_hotkey = str ? : conf_hotkey;
+    }
+    g_key_file_free(keyfile);
+    g_free((gpointer)conf_file);
+    g_free((gpointer)conf_dir);
+}
+
 //------------------------------------------
 // main
 
 int main (int argc, char** argv)
 {
-    printf("fehlstart 0.2.2 (c) 2011 maep\n");
+    printf("fehlstart 0.2.3 (c) 2011 maep\n");
 
     gtk_init(&argc, &argv);
+    read_config_file();
     parse_commandline(argc, argv);
 
     String de = detect_desktop_environment();
@@ -655,9 +661,15 @@ int main (int argc, char** argv)
     create_widgets();
 
     if (conf_one_time) // configured for one-time use
+    {
         show_window();
+    }
     else
-        register_hotkey(toggle_window);
+    {
+        keybinder_init();
+        keybinder_bind(conf_hotkey, toggle_window, NULL);
+        printf("hit %s to show window\n", conf_hotkey);
+    }
 
     gtk_main();
 
