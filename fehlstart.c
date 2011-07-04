@@ -19,9 +19,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <X11/Xlib.h>
 #include <gtk/gtk.h>
-#include <gdk/gdkx.h>
 #include <gdk/gdkkeysyms.h>
 #include <glib/gstdio.h>
 #include <gio/gdesktopappinfo.h>
@@ -113,6 +111,8 @@ static uint32_t filter_list_choice = 0;
 
 static char input_string[INPUT_STRING_SIZE];
 static uint32_t input_string_size = 0;
+
+static GStaticMutex lists_mutex = G_STATIC_MUTEX_INIT;
 
 // workaround for the focus_out_event bug
 static struct timeval last_hide = {0, 0};
@@ -317,6 +317,8 @@ void filter_action_list(String filter)
     if (filter.len == 0)
         return;
 
+    g_static_mutex_lock(&lists_mutex);
+
     if (filter_list_capacity < action_list_capacity)
     {
         filter_list_capacity = action_list_capacity;
@@ -327,6 +329,8 @@ void filter_action_list(String filter)
     for (size_t i = 0; i < action_list_size; i++)
         if (str_contains(action_list[i].keyword, filter))
             filter_list[filter_list_size++] = action_list + i;
+
+    g_static_mutex_unlock(&lists_mutex);
 }
 
 void update_action(String command, Action* action)
@@ -349,15 +353,20 @@ void change_selected(int delta)
 
 void run_selected(void)
 {
-    if (filter_list_size > 0)
+    g_static_mutex_lock(&lists_mutex);
+                                // check in case async list update fails
+    if (filter_list_size > 0 && filter_list_choice < action_list_size)
     {
+
         Action* action = filter_list[filter_list_choice];
         if (action->action != 0)
         {
-            String str = {input_string, input_string_size, FALSE};
+            String str = str_wrap_n(input_string, input_string_size);
             action->action(str, action);
         }
     }
+
+    g_static_mutex_unlock(&lists_mutex);
 }
 
 //------------------------------------------
@@ -388,16 +397,18 @@ void show_selected(void)
     const char* action_text = NO_MATCH_MESSAGE;
     String icon_name = STR_S(NO_MATCH_ICON);
 
+    g_static_mutex_lock(&lists_mutex);
     if (input_string_size == 0)
     {
         action_text = WELCOME_MESSAGE;
         icon_name = STR_S(DEFAULT_ICON);
-    }
-    else if (filter_list_size > 0)
+    }                             // check in case async list update fails
+    else if (filter_list_size > 0 && filter_list_size <= action_list_size)
     {
         action_text = filter_list[filter_list_choice]->label.str;
         icon_name = filter_list[filter_list_choice]->icon;
     }
+    g_static_mutex_unlock(&lists_mutex);
 
     gtk_label_set_text(GTK_LABEL(input_label), input_string);
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
@@ -424,6 +435,7 @@ void handle_text_input(GdkEventKey* event)
         && (input_string_size + 1) < INPUT_STRING_SIZE
         && (input_string_size > 0 || event->keyval != GDK_KEY_space))
         input_string[input_string_size++] = tolower(event->keyval);
+
     input_string[input_string_size] = 0;
     filter_action_list(get_first_input_word());
     filter_list_choice = 0;
@@ -532,7 +544,7 @@ void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
     {
         fputs("[Bindings]\nlaunch=<Super>space\n", fp);
         fputs("[Update]\ninterval=15\n", fp);
-        fputs("[Matching]\nstrict=true\n", fp);\
+        fputs("[Matching]\nstrict=false\n", fp);\
         fputs("[Icons]\nshow=true\n", fp);
     }
     if (fp)
@@ -565,8 +577,12 @@ void register_hotkey(void)
 // gets run periodically
 bool update_lists_cb(void *data)
 {
-    update_launch_list();
-    update_action_list();
+    if (g_static_mutex_trylock(&lists_mutex))
+    {
+        update_launch_list();
+        update_action_list();
+        g_static_mutex_unlock(&lists_mutex);
+    }
     return true;
 }
 
