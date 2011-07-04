@@ -531,7 +531,7 @@ void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
     if (!fp && (fp = fopen(conf_file, "w")))
     {
         fputs("[Bindings]\nlaunch=<Super>space\n", fp);
-        fputs("[Update]\nenabled=true\ninterval=15\n", fp);
+        fputs("[Update]\ninterval=15\n", fp);
         fputs("[Matching]\nstrict=true\n", fp);\
         fputs("[Icons]\nshow=true\n", fp);
     }
