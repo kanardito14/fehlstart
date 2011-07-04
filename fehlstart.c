@@ -434,7 +434,9 @@ void hide_window(void)
 {
     if (!gtk_widget_get_visible(window))
         return;
-
+    
+    gdk_keyboard_ungrab(GDK_CURRENT_TIME);
+    
     if (prefs.one_time) // configured for one-time use
         gtk_main_quit();
     else
@@ -462,6 +464,7 @@ void show_window(void)
         gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
         gtk_window_present(GTK_WINDOW(window));
         gtk_window_set_keep_above(GTK_WINDOW(window), true);
+        gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
     }
 }
 
