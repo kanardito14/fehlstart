@@ -540,7 +540,12 @@ int xerror_handler(Display* display, XErrorEvent* event)
 void register_hotkey(void (*callback)(const char*, void*))
 {
     keybinder_init();
-    keybinder_bind(prefs.hotkey, callback, NULL);
+    if (!keybinder_bind(prefs.hotkey, callback, NULL))
+    {
+        printf("couldn't grab %s", prefs.hotkey);
+        exit(1);
+    }
+    
     printf("hit %s to show window\n", prefs.hotkey);
 }
 
