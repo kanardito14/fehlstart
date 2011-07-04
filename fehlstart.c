@@ -597,7 +597,7 @@ void run_updates(void)
 
 void create_widgets(void)
 {
-    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
     gtk_window_set_keep_above(GTK_WINDOW(window), true);
