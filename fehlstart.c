@@ -339,17 +339,6 @@ void update_action(String command, Action* action)
     update_action_list();
 }
 
-void change_selected(int delta)
-{
-    if (filter_list_size != 0)
-    {
-        delta = (delta < 0) ?
-            filter_list_size - (-delta % filter_list_size) :
-            delta;
-        filter_list_choice += delta;
-        filter_list_choice %= filter_list_size;
-    }
-}
 
 void run_selected(void)
 {
@@ -517,12 +506,14 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
             hide_window();
         break;
         case GDK_KEY_Up:
-            change_selected(-1);
+            filter_list_choice += (filter_list_size - 1);
+            filter_list_choice %= filter_list_size;
             show_selected();
         break;
         case GDK_KEY_Tab:
         case GDK_KEY_Down:
-            change_selected(1);
+            filter_list_choice++;
+            filter_list_choice %= filter_list_size;
             show_selected();
         break;
         default:
