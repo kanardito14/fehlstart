@@ -434,9 +434,9 @@ void hide_window(void)
 {
     if (!gtk_widget_get_visible(window))
         return;
-    
+
     gdk_keyboard_ungrab(GDK_CURRENT_TIME);
-    
+
     if (prefs.one_time) // configured for one-time use
         gtk_main_quit();
     else
@@ -545,15 +545,20 @@ void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
         fclose(fp);
 }
 
+// macro for reading from keyfile, without overwriting default values
+#define READ_PREF(type, group, key, var)                 \
+    if (g_key_file_has_key(keyfile, group, key, NULL))  \
+        prefs.var = g_key_file_get_##type (keyfile, group, key, NULL)
+
 void read_config(const gchar *conf_file)
 {
     GKeyFile *keyfile = g_key_file_new();
     if (g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, NULL))
     {
-        prefs.hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", NULL);
-        prefs.strict_matching = g_key_file_get_boolean(keyfile, "Matching", "strict", NULL);
-        prefs.update_timeout = g_key_file_get_uint64(keyfile, "Update", "interval", NULL);
-        prefs.show_icon = g_key_file_get_boolean(keyfile, "Icons", "show", NULL);
+        READ_PREF(string, "Bindings", "launch", hotkey);
+        READ_PREF(boolean, "Matching", "strict", strict_matching);
+        READ_PREF(uint64, "Update", "interval", update_timeout);
+        READ_PREF(boolean, "Icons", "show", show_icon);
     }
     g_key_file_free(keyfile);
 }
@@ -591,10 +596,10 @@ void create_widgets(void)
     window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
-    gtk_window_set_keep_above(GTK_WINDOW(window), true);
-    gtk_window_set_decorated(GTK_WINDOW(window), false);
-    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), true);
-    gtk_window_set_skip_pager_hint(GTK_WINDOW(window), true);
+    //~ gtk_window_set_keep_above(GTK_WINDOW(window), true);
+    //~ gtk_window_set_decorated(GTK_WINDOW(window), false);
+    //~ gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), true);
+    //~ gtk_window_set_skip_pager_hint(GTK_WINDOW(window), true);
     gtk_window_set_accept_focus(GTK_WINDOW(window), true);
 
     gtk_widget_add_events(window, GDK_KEY_PRESS_MASK);
