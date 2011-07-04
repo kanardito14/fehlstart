@@ -625,20 +625,24 @@ const char* get_desktop_env(void)
     char* kde1 = getenv("KDE_FULL_SESSION");
     char* gnome = getenv("GNOME_DESKTOP_SESSION_ID");
     char* session = getenv("DESKTOP_SESSION");
+    char* current_desktop = getenv("XDG_CURRENT_DESKTOP");
     char* xdg_prefix = getenv("XDG_MENU_PREFIX");
+
     session = session ? : "";
     xdg_prefix = xdg_prefix ? : "";
 
     const char* desktop = "Old";
-    if (kde0 != 0 || kde1 != 0 || strstr(session, "kde") != 0)
+    if (strstr(session, "kde") || kde0 != 0 || kde1 != 0)
         desktop = "KDE";
-    else if (gnome != 0 || strcmp(session, "gnome") == 0)
+    else if (!strcmp(session, "gnome") || gnome != 0)
         desktop = "GNOME";
-    else if (strstr(xdg_prefix, "xfce") != 0 || strcmp(session, "xfce") == 0)
+    else if (!strcmp(session, "xfce") || strstr(xdg_prefix, "xfce"))
         desktop = "XFCE";
+    else if (!strcmp(session, "LXDE") || !strcmp(current_desktop, "LXDE"))
+        desktop = "LXDE";
+    else if (!strcmp(session, "ROX"))
+        desktop = "ROX";
     // todo:
-    //~ LXDE	LXDE Desktop
-    //~ ROX	    ROX Desktop
     //~ Unity	Unity Shell
     printf("detected desktop: %s\n", desktop);
     return desktop;
