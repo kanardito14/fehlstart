@@ -7,7 +7,7 @@ PKGS := keybinder gio-unix-2.0
 INCS := $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS))
 
-CFLAGS	:= -g -Wall -Wextra -std=gnu99 $(INCS) $(CFLAGS)
+CFLAGS	:= -Wall -Wextra -std=gnu99 $(INCS) $(CFLAGS)
 LDFLAGS	:= $(LIBS) $(LDFLAGS)
 
 SRCS := $(wildcard *.c)

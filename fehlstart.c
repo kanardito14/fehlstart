@@ -78,8 +78,26 @@ static Action actions[NUM_ACTIONS] = {
     {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(GTK_STOCK_QUIT), 0, quit_action}
 };
 
+//------------------------------------------
 // global variables
 
+// preferences
+static struct
+{
+    gchar *hotkey;
+    guint64 update_timeout;
+    bool strict_matching;
+    bool show_icon;
+    bool one_time;
+} prefs = {
+    DEFAULT_HOTKEY,
+    15,
+    false,
+    true,
+    false
+};
+
+// launcher stuff
 static Launch* launch_list = NULL;
 static uint32_t launch_list_capacity = 0;
 static uint32_t launch_list_size = 0;
@@ -100,15 +118,10 @@ static uint32_t input_string_size = 0;
 static struct timeval last_hide = {0, 0};
 
 // gtk widgets
-static GtkWidget* window = 0;
-static GtkWidget* image = 0;
-static GtkWidget* action_label = 0;
-static GtkWidget* input_label = 0;
-
-// options
-static const char* conf_hotkey = DEFAULT_HOTKEY;
-static bool conf_show_icon = true;
-static bool conf_one_time = false;
+static GtkWidget* window = NULL;
+static GtkWidget* image = NULL;
+static GtkWidget* action_label = NULL;
+static GtkWidget* input_label = NULL;
 
 //------------------------------------------
 // filesystem helpers
@@ -166,7 +179,7 @@ bool load_launcher(String file_name, Launch* launcher)
         launcher->name = str_duplicate(STR_D(str));
 
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        String icon = STR_D("applications-other");
+        String icon = STR_S("applications-other");
         if (str)
         {
             // if icon is not a full path but ends with file extension...
@@ -352,7 +365,7 @@ void run_selected(void)
 
 void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
 {
-    if (!conf_show_icon)
+    if (!prefs.show_icon)
         return;
 
     GIcon* icon = 0;
@@ -421,7 +434,7 @@ void hide_window(void)
     if (!gtk_widget_get_visible(window))
         return;
 
-    if (conf_one_time) // configured for one-time use
+    if (prefs.one_time) // configured for one-time use
         gtk_main_quit();
     else
     {
@@ -509,28 +522,59 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 }
 
 //------------------------------------------
-// hotkey functions
-
-GdkFilterReturn gdk_filter(GdkXEvent* gdk_xevent, GdkEvent* event, gpointer data)
-{
-    XKeyEvent* xevent = (XKeyEvent*) gdk_xevent;
-    if (xevent->type == KeyPress && data != 0)
-        ((void (*) (void)) data)();
-    return GDK_FILTER_CONTINUE;
-}
-
-int xerror_handler(Display* display, XErrorEvent* event)
-{
-    const char* error_msg = (event->type == BadAccess) ?
-        "failed to grab hotkey, another process is using it." :
-        "got X11 error when grabbing hotkey";
-    printf("%s\n", error_msg);
-    exit(EXIT_FAILURE);
-    return 0;
-}
-
-//------------------------------------------
 // misc
+
+void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
+{
+    g_mkdir_with_parents(conf_dir, 0700);
+    FILE *fp = fopen(conf_file, "r");
+    if (!fp && (fp = fopen(conf_file, "w")))
+    {
+        fputs("[Bindings]\nlaunch=<Super>space\n", fp);
+        fputs("[Update]\nenabled=true\ninterval=15\n", fp);
+        fputs("[Matching]\nstrict=true\n", fp);\
+        fputs("[Icons]\nshow=true\n", fp);
+    }
+    if (fp)
+        fclose(fp);
+}
+
+void read_config(const gchar *conf_file)
+{
+    GKeyFile *keyfile = g_key_file_new();
+    if (g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, NULL))
+    {
+        prefs.hotkey = g_key_file_get_string(keyfile, "Bindings", "launch", NULL);
+        prefs.strict_matching = g_key_file_get_boolean(keyfile, "Matching", "strict", NULL);
+        prefs.update_timeout = g_key_file_get_uint64(keyfile, "Update", "interval", NULL);
+        prefs.show_icon = g_key_file_get_boolean(keyfile, "Icons", "show", NULL);
+    }
+    g_key_file_free(keyfile);
+}
+
+void register_hotkey(void)
+{
+    if (!prefs.one_time)
+    {
+        keybinder_init();
+        keybinder_bind(prefs.hotkey, toggle_window, NULL);
+        printf("hit %s to show window\n", prefs.hotkey);
+    }
+}
+
+// gets run periodically
+bool update_lists_cb(void *data)
+{
+    update_launch_list();
+    update_action_list();
+    return true;
+}
+
+void run_updates(void)
+{
+    if (prefs.update_timeout && !prefs.one_time)
+        g_timeout_add_seconds(60 * prefs.update_timeout, (GSourceFunc) update_lists_cb, NULL);
+}
 
 void create_widgets(void)
 {
@@ -567,7 +611,7 @@ void create_widgets(void)
     gtk_widget_show(input_label);
 }
 
-String detect_desktop_environment(void)
+const char* get_desktop_env(void)
 {
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
@@ -578,18 +622,18 @@ String detect_desktop_environment(void)
     session = session ? : "";
     xdg_prefix = xdg_prefix ? : "";
 
-    String desktop = STR_S("Old");
+    const char* desktop = "Old";
     if (kde0 != 0 || kde1 != 0 || strstr(session, "kde") != 0)
-        desktop = STR_S("KDE");
+        desktop = "KDE";
     else if (gnome != 0 || strcmp(session, "gnome") == 0)
-        desktop = STR_S("GNOME");
+        desktop = "GNOME";
     else if (strstr(xdg_prefix, "xfce") != 0 || strcmp(session, "xfce") == 0)
-        desktop = STR_S("XFCE");
+        desktop = "XFCE";
     // todo:
     //~ LXDE	LXDE Desktop
     //~ ROX	    ROX Desktop
     //~ Unity	Unity Shell
-    printf("detected desktop: %s\n", desktop.str);
+    printf("detected desktop: %s\n", desktop);
     return desktop;
 }
 
@@ -598,9 +642,9 @@ void parse_commandline(int argc, char** argv)
     for (int i = 1; i < argc; i++)
     {
         if (!strcmp(argv[i], "--one-way"))
-            conf_one_time = true;
+            prefs.one_time = true;
         else if (!strcmp(argv[i], "--no-icon"))
-            conf_show_icon = false;
+            prefs.show_icon = false;
         else if (!strcmp(argv[i], "--help"))
         {
             printf("options:\n\t--one-way\texit after one use\n"
@@ -612,34 +656,6 @@ void parse_commandline(int argc, char** argv)
     }
 }
 
-void read_config_file(void)
-{
-    const gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
-    const gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
-
-    if (!is_directory(conf_dir) || !is_file(conf_file))
-    {
-        g_mkdir_with_parents(conf_dir, 0700);
-        FILE *fp = fopen(conf_file, "w");
-        if (fp)
-        {
-            fputs("[Bindings]\nlaunch=<Super>space\n", fp);
-            fclose(fp);
-        }
-    }
-
-    GKeyFile *keyfile = g_key_file_new();
-    if (g_key_file_load_from_file(keyfile, conf_file, G_KEY_FILE_NONE, NULL))
-    {
-        const gchar* str = g_key_file_get_string(keyfile, "Bindings", "launch", NULL);
-        conf_hotkey = str ? : conf_hotkey;
-    }
-    g_key_file_free(keyfile);
-    g_free((gpointer)conf_file);
-    g_free((gpointer)conf_dir);
-}
-
-//------------------------------------------
 // main
 
 int main (int argc, char** argv)
@@ -647,30 +663,27 @@ int main (int argc, char** argv)
     printf("fehlstart 0.2.3 (c) 2011 maep\n");
 
     gtk_init(&argc, &argv);
-    read_config_file();
     parse_commandline(argc, argv);
 
-    String de = detect_desktop_environment();
-    g_desktop_app_info_set_desktop_env(de.str);
-
+    g_desktop_app_info_set_desktop_env(get_desktop_env());
     g_chdir(get_home_dir());
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
+
+    gchar *conf_dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    gchar *conf_file = g_build_filename(conf_dir, "fehlstart.rc", NULL);
+
+    create_config_if_nonexistent(conf_dir, conf_file);
+    read_config(conf_file);
 
     update_launch_list();
     update_action_list();
     create_widgets();
 
-    if (conf_one_time) // configured for one-time use
-    {
+    if (prefs.one_time) // one-time use
         show_window();
-    }
-    else
-    {
-        keybinder_init();
-        keybinder_bind(conf_hotkey, toggle_window, NULL);
-        printf("hit %s to show window\n", conf_hotkey);
-    }
 
+    register_hotkey();
+    run_updates();
     gtk_main();
 
     return EXIT_SUCCESS;
