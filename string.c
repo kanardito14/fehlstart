@@ -67,28 +67,31 @@ inline static int cdiff_i(char a, char b)
     return tolower(a) - tolower(b);
 }
 
-static bool str_contains_impl(String s, String what, int (*dif) (char, char))
+static uint32_t str_find_first_impl(String s, String what, int (*dif) (char, char))
 {
-    if (what.len > s.len)
-        return false;
     uint32_t wi = 0;
-    for (uint32_t i = 0; i < s.len; i++)
+    for (uint32_t i = 0; i < s.len && wi < what.len; i++)
     {
         wi = !dif(s.str[i], what.str[wi]) ? wi + 1 : 0;
         if (wi == what.len)
-            return true;
+            return i - what.len;
     }
-    return false;
+    return STR_END;
+}
+
+uint32_t str_find_first_i(String s, String what)
+{
+    return str_find_first_impl(s, what, cdiff_i);
 }
 
 bool str_contains(String s, String what)
 {
-    return str_contains_impl(s, what, cdiff_s);
+    return str_find_first_impl(s, what, cdiff_i) != STR_END;
 }
 
 bool str_contains_i(String s, String what)
 {
-    return str_contains_impl(s, what, cdiff_i);
+    return str_find_first_impl(s, what, cdiff_s) != STR_END;
 }
 
 static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
@@ -113,7 +116,7 @@ String str_to_lower(String s)
     return s;
 }
 
-int str_compare_impl(String a, String b, int (*dif) (char, char))
+static int str_compare_impl(String a, String b, int (*dif) (char, char))
 {
     for (uint32_t i = 0; i < MIN(a.len, b.len); i++)
         if (dif(a.str[i], b.str[i]))
