@@ -50,6 +50,7 @@ typedef struct
 {
     String file;
     String name;
+    String executable;
     String icon;
 } Launch;
 
@@ -57,6 +58,7 @@ typedef struct Action_
 {
     String label;
     String keyword;
+    String executable;
     String icon;
     void*  data;
     void (*action) (String, struct Action_*);
@@ -72,8 +74,8 @@ void quit_action(String, Action*);
 
 #define NUM_ACTIONS 2
 static Action actions[NUM_ACTIONS] = {
-    {STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I(GTK_STOCK_REFRESH), 0 , update_action},
-    {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(GTK_STOCK_QUIT), 0, quit_action}
+    {STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I(GTK_STOCK_REFRESH), 0 , update_action},
+    {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(GTK_STOCK_QUIT), 0, quit_action}
 };
 
 //------------------------------------------
@@ -177,7 +179,7 @@ bool load_launcher(String file_name, Launch* launcher)
         launcher->file = file_name;
         const char* str = g_app_info_get_name(G_APP_INFO(info));
         launcher->name = str_duplicate(STR_D(str));
-
+        launcher->executable = str_duplicate(STR_D(g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_EXEC, 0)));
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         String icon = STR_S("applications-other");
         if (str)
@@ -307,7 +309,7 @@ void update_action_list(void)
         Launch* l = launch_list + i;
         String keyword = str_duplicate(l->name);
         str_to_lower(keyword);
-        Action action = {l->name, keyword, l->icon, l, launch_action};
+        Action action = {l->name, keyword, l->executable, l->icon, l, launch_action};
         add_action(&action);
     }
     for (size_t i = 0; i < NUM_ACTIONS; i++)
