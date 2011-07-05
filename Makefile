@@ -12,7 +12,12 @@ LDFLAGS	:= $(LIBS) $(LDFLAGS)
 
 SRCS := $(wildcard *.c)
 OBJS := $(SRCS:.c=.o)
+
+all: CC += -DNDEBUG -O2
 all: fehlstart
+
+debug: CC += -DDEBUG -g
+debug: fehlstart
 
 fehlstart: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)

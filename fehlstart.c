@@ -50,6 +50,7 @@ typedef struct
 {
     String file;
     String name;
+    String executable;
     String icon;
 } Launch;
 
@@ -179,9 +180,13 @@ bool load_launcher(String file_name, Launch* launcher)
     if (used)
     {
         launcher->file = file_name;
+        // get name
         const char* str = g_app_info_get_name(G_APP_INFO(info));
         launcher->name = str_new(str);
-
+        // executable
+        str = g_app_info_get_executable(G_APP_INFO(info));
+        launcher->executable = str_new(str);
+        // icon
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         String icon = STR_S("applications-other");
         if (str)
@@ -207,6 +212,7 @@ void free_launcher(Launch* launcher)
 {
     str_free(launcher->file);
     str_free(launcher->name);
+    str_free(launcher->executable);
     str_free(launcher->icon);
 }
 
@@ -293,13 +299,16 @@ void add_action(Action* action)
 void clear_action_list(void)
 {
     for (uint32_t i = 0; i < action_list_size; i++)
-        str_free(action_list[i].keyword);
+    {
+        str_free(action_list[i].keywords);
+        str_free(action_list[i].short_key);
+    }
     action_list_size = 0;
 }
 
 int compare_action(const void* a, const void* b)
 {
-    return str_compare(((Action*)a)->keyword, ((Action*)b)->keyword);
+    return str_compare_i(((Action*)a)->label, ((Action*)b)->label);
 }
 
 void update_action_list(void)
@@ -310,7 +319,7 @@ void update_action_list(void)
         Launch* l = launch_list + i;
         String keyword = str_duplicate(l->name);
         str_to_lower(keyword);
-        Action action = {l->name, keyword, l->icon, l, launch_action};
+        Action action = {l->name, keyword, l->executable, l->icon, l, launch_action};
         add_action(&action);
     }
     for (size_t i = 0; i < NUM_ACTIONS; i++)
@@ -333,7 +342,7 @@ void filter_action_list(String filter)
 
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++)
-        if (str_contains_i(action_list[i].keyword, filter))
+        if (str_contains_i(action_list[i].keywords, filter))
             filter_list[filter_list_size++] = action_list + i;
 
     g_static_mutex_unlock(&lists_mutex);
@@ -641,12 +650,13 @@ const char* get_desktop_env(void)
 
     session = session ? : "";
     xdg_prefix = xdg_prefix ? : "";
+    current_desktop = current_desktop ? : "";
 
     const char* desktop = "Old";
     // todo: Unity	Unity Shell
-    if (strstr(session, "kde") || kde0 != 0 || kde1 != 0)
+    if (strstr(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
-    else if (!strcmp(session, "gnome") || gnome != 0)
+    else if (!strcmp(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
     else if (!strcmp(session, "xfce") || strstr(xdg_prefix, "xfce"))
         desktop = "XFCE";

@@ -7,7 +7,7 @@
 #include "string.h"
 
 // No sense in including all of glib for this, make use of gcc
-#define MIN(a, b)  ({ typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b })
+#define MIN(a, b)  ({ typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b; })
 
 String str_wrap_n(const char* s, uint32_t n)
 {
@@ -21,7 +21,7 @@ String str_wrap(const char* s)
 
 String str_create(uint32_t len)
 {
-    return ((String) {calloc(len + 1), len, true})
+    return ((String) {calloc(len + 1, 1), len, true});
 }
 
 String str_new(const char* s)
@@ -38,14 +38,13 @@ void str_free(String s)
 String str_duplicate(String s)
 {
     String dst = str_create(s.len);
-    strncpy(dst.str, s.str, s.len)
+    strncpy(dst.str, s.str, s.len);
     return dst;
 }
 
 String str_concat(String a, String b)
 {
     String dst = str_create(a.len + b.len);
-    uint32_t i = 0;
     strncpy(dst.str, a.str, a.len);
     strncpy(dst.str + a.len, b.str, b.len);
     return dst;
@@ -97,7 +96,7 @@ static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
     if (s.len < suffix.len)
         return false;
     for (uint32_t i = 1; i <= suffix.len; i++)
-        if (!cmp(s.str[s.len - i], suffix.str[suffix.len - i]))
+        if (dif(s.str[s.len - i], suffix.str[suffix.len - i]))
             return false;
     return true;
 }
