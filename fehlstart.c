@@ -208,10 +208,11 @@ void free_launcher(Launch* launcher)
 
 void populate_launch_list(String dir_name)
 {
-    printf("reading %s\n", dir_name.str);
     DIR* dir = opendir(dir_name.str);
     if (dir == 0)
         return;
+    printf("reading %s\n", dir_name.str);
+
     struct dirent* ent = 0;
     while ((ent = readdir(dir)) != 0)
     {
@@ -246,8 +247,7 @@ void update_launch_list(void)
         String home_dir = STR_D(home);
         String user_dir = STR_S(USER_APPLICATIONS_DIR);
         String full_path = assemble_path(home_dir, user_dir);
-        if (is_directory(full_path.str))
-            populate_launch_list(full_path);
+        populate_launch_list(full_path);
         str_free(full_path);
     }
 }
@@ -255,19 +255,22 @@ void update_launch_list(void)
 void launch_action(String cmd, Action* action)
 {
     pid_t pid = fork();
-    if (pid == 0)
+    if (pid != 0)
+        return;
+
+    setsid(); // "detatch" from parent process
+    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
+    Launch* launch = action->data;
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
+    if (info != 0)
     {
-        setsid(); // "detatch" from parent process
-        signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
-        Launch* launch = action->data;
-        GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
-        if (info != 0)
-        {
-            g_app_info_launch(G_APP_INFO(info), 0, 0, 0);
-            g_object_unref(G_OBJECT(info));
-        }
-        exit(EXIT_SUCCESS);
+        // todo: I'd like to pass arguments here, g_app_info_launch supports
+        // uris and files but that's not really what I'm looking for
+        const gchar* exec = g_app_info_get_executable(G_APP_INFO(info));
+        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
+        g_object_unref(G_OBJECT(info));
     }
+    exit(EXIT_SUCCESS);
 }
 
 //------------------------------------------
@@ -327,7 +330,7 @@ void filter_action_list(String filter)
 
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++)
-        if (str_contains(action_list[i].keyword, filter))
+        if (str_contains_i(action_list[i].keyword, filter))
             filter_list[filter_list_size++] = action_list + i;
 
     g_static_mutex_unlock(&lists_mutex);
@@ -423,7 +426,7 @@ void handle_text_input(GdkEventKey* event)
     else if (event->length == 1
         && (input_string_size + 1) < INPUT_STRING_SIZE
         && (input_string_size > 0 || event->keyval != GDK_KEY_space))
-        input_string[input_string_size++] = tolower(event->keyval);
+        input_string[input_string_size++] = event->keyval;
 
     input_string[input_string_size] = 0;
     filter_action_list(get_first_input_word());
@@ -546,7 +549,7 @@ void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
 }
 
 // macro for reading from keyfile, without overwriting default values
-#define READ_PREF(type, group, key, var)                 \
+#define READ_PREF(type, group, key, var)                \
     if (g_key_file_has_key(keyfile, group, key, NULL))  \
         prefs.var = g_key_file_get_##type (keyfile, group, key, NULL)
 
@@ -640,6 +643,7 @@ const char* get_desktop_env(void)
     xdg_prefix = xdg_prefix ? : "";
 
     const char* desktop = "Old";
+    // todo: Unity	Unity Shell
     if (strstr(session, "kde") || kde0 != 0 || kde1 != 0)
         desktop = "KDE";
     else if (!strcmp(session, "gnome") || gnome != 0)
@@ -650,8 +654,7 @@ const char* get_desktop_env(void)
         desktop = "LXDE";
     else if (!strcmp(session, "ROX"))
         desktop = "ROX";
-    // todo:
-    //~ Unity	Unity Shell
+
     printf("detected desktop: %s\n", desktop);
     return desktop;
 }
