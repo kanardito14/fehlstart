@@ -56,7 +56,8 @@ typedef struct
 typedef struct Action_
 {
     String label;
-    String keyword;
+    String keywords;
+    String short_key;
     String icon;
     void*  data;
     void (*action) (String, struct Action_*);
@@ -64,6 +65,7 @@ typedef struct Action_
 
 //------------------------------------------
 // forward declarations
+
 void update_action(String, Action*);
 void quit_action(String, Action*);
 
@@ -72,8 +74,8 @@ void quit_action(String, Action*);
 
 #define NUM_ACTIONS 2
 static Action actions[NUM_ACTIONS] = {
-    {STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I(GTK_STOCK_REFRESH), 0 , update_action},
-    {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(GTK_STOCK_QUIT), 0, quit_action}
+    {STR_I("update fehlstart"), STR_I("update fehlstart"), STR_I(""), STR_I(GTK_STOCK_REFRESH), 0 , update_action},
+    {STR_I("quit fehlstart"), STR_I("quit fehlstart"), STR_I(""), STR_I(GTK_STOCK_QUIT), 0, quit_action}
 };
 
 //------------------------------------------
@@ -85,12 +87,14 @@ static struct
     gchar *hotkey;
     guint64 update_timeout;
     bool strict_matching;
+    bool match_executable;
     bool show_icon;
     bool one_time;
 } prefs = {
     DEFAULT_HOTKEY,
     15,
     false,
+    true,
     true,
     false
 };
@@ -176,15 +180,15 @@ bool load_launcher(String file_name, Launch* launcher)
     {
         launcher->file = file_name;
         const char* str = g_app_info_get_name(G_APP_INFO(info));
-        launcher->name = str_duplicate(STR_D(str));
+        launcher->name = str_new(str);
 
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         String icon = STR_S("applications-other");
         if (str)
         {
+            icon = str_wrap(str);
             // if icon is not a full path but ends with file extension...
             // the skype package does this, and icon lookup works only without the .png
-            icon = STR_D(str);
             if (!g_path_is_absolute(icon.str)
                 && (str_ends_with_i(icon, STR_S(".png"))
                 || str_ends_with_i(icon, STR_S(".svg"))
@@ -216,7 +220,7 @@ void populate_launch_list(String dir_name)
     struct dirent* ent = 0;
     while ((ent = readdir(dir)) != 0)
     {
-        String file_name = STR_D(ent->d_name);
+        String file_name = str_wrap(ent->d_name);
         if (str_ends_with_i(file_name, STR_S(".desktop")))
         {
             String full_path = assemble_path(dir_name, file_name);
@@ -244,7 +248,7 @@ void update_launch_list(void)
     const char* home = get_home_dir();
     if (home != 0)
     {
-        String home_dir = STR_D(home);
+        String home_dir = str_wrap(home);
         String user_dir = STR_S(USER_APPLICATIONS_DIR);
         String full_path = assemble_path(home_dir, user_dir);
         populate_launch_list(full_path);
@@ -266,7 +270,6 @@ void launch_action(String cmd, Action* action)
     {
         // todo: I'd like to pass arguments here, g_app_info_launch supports
         // uris and files but that's not really what I'm looking for
-        const gchar* exec = g_app_info_get_executable(G_APP_INFO(info));
         g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
         g_object_unref(G_OBJECT(info));
     }
@@ -541,7 +544,7 @@ void create_config_if_nonexistent(const gchar *conf_dir, const gchar *conf_file)
     {
         fputs("[Bindings]\nlaunch=<Super>space\n", fp);
         fputs("[Update]\ninterval=15\n", fp);
-        fputs("[Matching]\nstrict=false\n", fp);\
+        fputs("[Matching]\nstrict=false\nexecutable=true\n", fp);
         fputs("[Icons]\nshow=true\n", fp);
     }
     if (fp)
@@ -560,6 +563,7 @@ void read_config(const gchar *conf_file)
     {
         READ_PREF(string, "Bindings", "launch", hotkey);
         READ_PREF(boolean, "Matching", "strict", strict_matching);
+        READ_PREF(boolean, "Matching", "executable", match_executable);
         READ_PREF(uint64, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
     }
