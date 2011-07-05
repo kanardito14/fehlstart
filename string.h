@@ -8,24 +8,68 @@ typedef struct
     bool can_free;
 } String;
 
-// string "constructor" macros
-#define STR_S(arg) ((String) {(arg), sizeof(arg) - 1, false})   // for static strings (comile time)
-#define STR_I(arg) {(arg), sizeof(arg) - 1, false}              // for initializer (compile time)
-#define STR_D(arg) str_wrap(arg)                                // for dymanic strings (runtime)
+// string "constructor" for creating strings with no runtime overhead at comile time
+// for static strings
+#define STR_S(arg) ((String) {(arg), sizeof(arg) - 1, false})
+// for initializer lists, etc
+#define STR_I(arg) {(arg), sizeof(arg) - 1, false}
 
-String str_wrap_n(const char* s, uint32_t n);
+// wrap a zero terminated c string
 String str_wrap(const char* s);
+
+// wrap a c string of length len
+String str_wrap_n(const char* s, uint32_t len);
+
+// create an empsty sero padded string
+// must be freed with str_free()
 String str_create(uint32_t len);
-void str_free(String s);
+
+// create a new string from a zero terminated c string
+// must be freed with str_free()
+String str_new(const char* s);
+
+// duplicate string
+// must be freed with str_free()
 String str_duplicate(String s);
+
+// concatinate (append) two strings
+// must be freed with str_free()
+String str_concat(String a, String b);
+
+// free strings allocated with str_duplicate, or str_new
+// safe to use for static strings
+void str_free(String s);
+
+// create substring, using same memory as s
 String str_substring(String s, uint32_t begin, uint32_t length);
+
+// returns true if s contains what, case sensitive
 bool str_contains(String s, String what);
+
+// returns true if s contains what, not case sensitive
 bool str_contains_i(String s, String what);
+
+// returns true if s ends with suffix, not case sensitive
 bool str_ends_with_i(String s, String suffix);
+
+// converts string to lowercase, returned string is same as s
 String str_to_lower(String s);
+
+// like strcmp, not case sensitive
 int str_compare_i(String a, String b);
+
+// wrapper for str_compare_i() == 0
 bool str_equal_i(String a, String b);
+
+// like strcmp, case sensitive
 int str_compare(String a, String b);
+
+// wrapper for str_compare() == 0
 bool str_equal(String a, String b);
+
+// creat a new path from two parts
+// example 1: "/foo" "bar" -> "/foo/bar"
+// example 2: "/foo/" "bar" -> "/foo/bar"
+// must be freed with str_free()
 String assemble_path(String prefix, String suffix);
 

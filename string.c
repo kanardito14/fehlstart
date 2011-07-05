@@ -2,29 +2,31 @@
 #include <string.h>
 #include <sys/types.h>
 #include <ctype.h>
+#include <malloc.h>
 
 #include "string.h"
 
-// No sense in including all of glib for this
-#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
+// No sense in including all of glib for this, make use of gcc
+#define MIN(a, b)  ({ typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b })
 
 String str_wrap_n(const char* s, uint32_t n)
 {
-    return (s == 0) ?
-        ((String) {"", 0, false}) :
-        ((String) {(char*)s, n, false});
+    return (s == 0 || n == 0) ? STR_S("") : ((String) {(char*)s, n, false});
 }
 
 String str_wrap(const char* s)
 {
-    return str_wrap_n(s, strlen(s));
+    return str_wrap_n(s, s != 0 ? strlen(s) : 0);
 }
 
 String str_create(uint32_t len)
 {
-    String s = {malloc(len + 1), len, true};
-    memset(s.str, 0, len + 1);
-    return s;
+    return ((String) {calloc(len + 1), len, true})
+}
+
+String str_new(const char* s)
+{
+    return str_duplicate(str_wrap(s));
 }
 
 void str_free(String s)
@@ -36,10 +38,16 @@ void str_free(String s)
 String str_duplicate(String s)
 {
     String dst = str_create(s.len);
+    strncpy(dst.str, s.str, s.len)
+    return dst;
+}
+
+String str_concat(String a, String b)
+{
+    String dst = str_create(a.len + b.len);
     uint32_t i = 0;
-    for (; s.str[i] != 0 && i < s.len; i++)
-        dst.str[i] = s.str[i];
-    dst.str[i] = 0;
+    strncpy(dst.str, a.str, a.len);
+    strncpy(dst.str + a.len, b.str, b.len);
     return dst;
 }
 
@@ -50,42 +58,53 @@ String str_substring(String s, uint32_t begin, uint32_t length)
     return str_wrap_n(str, len);
 }
 
-bool str_contains(String s, String what)
+inline static int cdiff_s(char a, char b)
+{
+    return a - b;
+}
+
+inline static int cdiff_i(char a, char b)
+{
+    return tolower(a) - tolower(b);
+}
+
+static bool str_contains_impl(String s, String what, int (*dif) (char, char))
 {
     if (what.len > s.len)
         return false;
     uint32_t wi = 0;
     for (uint32_t i = 0; i < s.len; i++)
     {
-        wi = (s.str[i] == what.str[wi]) ? wi + 1 : 0;
+        wi = !dif(s.str[i], what.str[wi]) ? wi + 1 : 0;
         if (wi == what.len)
             return true;
     }
     return false;
+}
+
+bool str_contains(String s, String what)
+{
+    return str_contains_impl(s, what, cdiff_s);
 }
 
 bool str_contains_i(String s, String what)
 {
-    if (what.len > s.len)
-        return false;
-    uint32_t wi = 0;
-    for (uint32_t i = 0; i < s.len; i++)
-    {
-        wi = (tolower(s.str[i]) == tolower(what.str[wi])) ? wi + 1 : 0;
-        if (wi == what.len)
-            return true;
-    }
-    return false;
+    return str_contains_impl(s, what, cdiff_i);
 }
 
-bool str_ends_with_i(String s, String suffix)
+static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
 {
     if (s.len < suffix.len)
         return false;
     for (uint32_t i = 1; i <= suffix.len; i++)
-        if (tolower(s.str[s.len - i]) != tolower(suffix.str[suffix.len - i]))
+        if (!cmp(s.str[s.len - i], suffix.str[suffix.len - i]))
             return false;
     return true;
+}
+
+bool str_ends_with_i(String s, String suffix)
+{
+    return str_ends_with_impl(s, suffix, cdiff_i);
 }
 
 String str_to_lower(String s)
@@ -95,39 +114,34 @@ String str_to_lower(String s)
     return s;
 }
 
+int str_compare_impl(String a, String b, int (*dif) (char, char))
+{
+    for (uint32_t i = 0; i < MIN(a.len, b.len); i++)
+        if (dif(a.str[i], b.str[i]))
+            return dif(a.str[i], b.str[i]);
+    return 0;
+}
+
 int str_compare_i(String a, String b)
 {
-    for (uint32_t i = 0; i < a.len && i < b.len; i++)
-    {
-        int diff = tolower(a.str[i]) - tolower(b.str[i]);
-        if (diff != 0)
-            return diff;
-    }
-    return a.len - b.len;
+    return str_compare_impl(a, b, cdiff_i);
 }
 
 bool str_equal_i(String a, String b)
 {
-    return str_compare_i(a, b) == 0;
+    return str_compare_impl(a, b, cdiff_i) == 0;
 }
 
 int str_compare(String a, String b)
 {
-    for (uint32_t i = 0; i < a.len && i < b.len; i++)
-    {
-        int diff = a.str[i] - b.str[i];
-        if (diff != 0)
-            return diff;
-    }
-    return a.len - b.len;
+    return str_compare_impl(a, b, cdiff_s);
 }
 
 bool str_equal(String a, String b)
 {
-    return str_compare(a, b) == 0;
+    return str_compare_impl(a, b, cdiff_s) == 0;
 }
 
-// creates a new string that must be freed
 String assemble_path(String prefix, String suffix)
 {
     String path = str_create(prefix.len + suffix.len + 1);
