@@ -332,7 +332,8 @@ void filter_action_list(String filter)
 
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++)
-        if (str_contains_i(action_list[i].keyword, filter))
+        if (str_contains_i(action_list[i].keyword, filter)
+            || str_contains_i(action_list[i].executable, filter))
             filter_list[filter_list_size++] = action_list + i;
 
     g_static_mutex_unlock(&lists_mutex);
