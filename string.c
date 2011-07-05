@@ -64,6 +64,20 @@ bool str_contains(String s, String what)
     return false;
 }
 
+bool str_contains_i(String s, String what)
+{
+    if (what.len > s.len)
+        return false;
+    uint32_t wi = 0;
+    for (uint32_t i = 0; i < s.len; i++)
+    {
+        wi = (tolower(s.str[i]) == tolower(what.str[wi])) ? wi + 1 : 0;
+        if (wi == what.len)
+            return true;
+    }
+    return false;
+}
+
 bool str_ends_with_i(String s, String suffix)
 {
     if (s.len < suffix.len)

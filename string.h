@@ -20,6 +20,7 @@ void str_free(String s);
 String str_duplicate(String s);
 String str_substring(String s, uint32_t begin, uint32_t length);
 bool str_contains(String s, String what);
+bool str_contains_i(String s, String what);
 bool str_ends_with_i(String s, String suffix);
 String str_to_lower(String s);
 int str_compare_i(String a, String b);
