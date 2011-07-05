@@ -637,12 +637,13 @@ const char* get_desktop_env(void)
 
     session = session ? : "";
     xdg_prefix = xdg_prefix ? : "";
+    current_desktop = current_desktop ? : "";
 
     const char* desktop = "Old";
     // todo: Unity	Unity Shell
-    if (strstr(session, "kde") || kde0 != 0 || kde1 != 0)
+    if (strstr(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
-    else if (!strcmp(session, "gnome") || gnome != 0)
+    else if (!strcmp(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
     else if (!strcmp(session, "xfce") || strstr(xdg_prefix, "xfce"))
         desktop = "XFCE";
