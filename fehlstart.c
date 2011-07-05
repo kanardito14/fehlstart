@@ -654,15 +654,15 @@ const char* get_desktop_env(void)
 
     const char* desktop = "Old";
     // todo: Unity	Unity Shell
-    if (strstr(session, "kde") || kde0 != NULL || kde1 != NULL)
+    if (strcasestr(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
-    else if (!strcmp(session, "gnome") || gnome != NULL)
+    else if (strcasestr(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
-    else if (!strcmp(session, "xfce") || strstr(xdg_prefix, "xfce"))
+    else if (strcasestr(session, "xfce") || strcasestr(xdg_prefix, "xfce"))
         desktop = "XFCE";
-    else if (!strcmp(session, "LXDE") || !strcmp(current_desktop, "LXDE"))
+    else if (strcasestr(session, "lxde") || strcasestr(current_desktop, "lxde"))
         desktop = "LXDE";
-    else if (!strcmp(session, "ROX"))
+    else if (strcasestr(session, "rox"))
         desktop = "ROX";
 
     printf("detected desktop: %s\n", desktop);
