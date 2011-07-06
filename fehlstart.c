@@ -564,7 +564,9 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 
 void save_config(void)
 {
-    fclose(fopen(config_file, "w")); // touch file
+    FILE* f = fopen(action_file, "w"); // touch file
+    if (f)
+        fclose(f);
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
     {
@@ -598,7 +600,9 @@ void read_config(void)
 
 void save_actions(void)
 {
-    fclose(fopen(action_file, "w")); // touch file
+    FILE* f = fopen(action_file, "w"); // touch file
+    if (f)
+        fclose(f);
 
     GKeyFile* kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL))
