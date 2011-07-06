@@ -1,6 +1,4 @@
-#include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <ctype.h>
 #include <malloc.h>
 
@@ -35,6 +33,8 @@ void str_free(String s)
         free(s.str);
 }
 
+//------------------------------------------
+
 String str_duplicate(String s)
 {
     String dst = str_create(s.len);
@@ -49,6 +49,24 @@ String str_concat(String a, String b)
     strncpy(dst.str + a.len, b.str, b.len);
     return dst;
 }
+
+String assemble_path(String prefix, String suffix)
+{
+    String path = str_create(prefix.len + suffix.len + 1);
+
+    strncpy(path.str, prefix.str, prefix.len);
+    if (path.str[prefix.len - 1] != '/')
+        path.str[prefix.len++] = '/';
+
+    strncpy(path.str + prefix.len, suffix.str, suffix.len);
+
+    path.str[prefix.len + suffix.len] = 0;
+    path.len = prefix.len + suffix.len;
+
+    return path;
+}
+
+//------------------------------------------
 
 String str_substring(String s, uint32_t begin, uint32_t length)
 {
@@ -74,7 +92,7 @@ static uint32_t str_find_first_impl(String s, String what, int (*dif) (char, cha
     {
         wi = !dif(s.str[i], what.str[wi]) ? wi + 1 : 0;
         if (wi == what.len)
-            return i - what.len;
+            return i - what.len + 1;
     }
     return STR_END;
 }
@@ -86,12 +104,24 @@ uint32_t str_find_first_i(String s, String what)
 
 bool str_contains(String s, String what)
 {
-    return str_find_first_impl(s, what, cdiff_i) != STR_END;
+    return str_find_first_impl(s, what, cdiff_s) != STR_END;
 }
 
 bool str_contains_i(String s, String what)
 {
-    return str_find_first_impl(s, what, cdiff_s) != STR_END;
+    return str_find_first_impl(s, what, cdiff_i) != STR_END;
+}
+
+//------------------------------------------
+
+static bool str_starts_with_impl(String s, String prefix, int (*dif) (char, char))
+{
+    if (s.len < prefix.len)
+        return false;
+    for (uint32_t i = 0; i < prefix.len; i++)
+        if (dif(s.str[i], prefix.str[i]))
+            return false;
+    return true;
 }
 
 static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
@@ -104,17 +134,27 @@ static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
     return true;
 }
 
+bool str_starts_with(String s, String prefix)
+{
+    return str_starts_with_impl(s, prefix, cdiff_s);
+}
+
+bool str_starts_with_i(String s, String prefix)
+{
+    return str_starts_with_impl(s, prefix, cdiff_i);
+}
+
+bool str_ends_with(String s, String suffix)
+{
+    return str_ends_with_impl(s, suffix, cdiff_s);
+}
+
 bool str_ends_with_i(String s, String suffix)
 {
     return str_ends_with_impl(s, suffix, cdiff_i);
 }
 
-String str_to_lower(String s)
-{
-    for (uint32_t i = 0; i < s.len; i++)
-        s.str[i] = tolower(s.str[i]);
-    return s;
-}
+//------------------------------------------
 
 static int str_compare_impl(String a, String b, int (*dif) (char, char))
 {
@@ -144,19 +184,11 @@ bool str_equal(String a, String b)
     return str_compare_impl(a, b, cdiff_s) == 0;
 }
 
-String assemble_path(String prefix, String suffix)
+//------------------------------------------
+
+String str_to_lower(String s)
 {
-    String path = str_create(prefix.len + suffix.len + 1);
-
-    strncpy(path.str, prefix.str, prefix.len);
-    if (path.str[prefix.len - 1] != '/')
-        path.str[prefix.len++] = '/';
-
-    strncpy(path.str + prefix.len, suffix.str, suffix.len);
-
-    path.str[prefix.len + suffix.len] = 0;
-    path.len = prefix.len + suffix.len;
-
-    return path;
+    for (uint32_t i = 0; i < s.len; i++)
+        s.str[i] = tolower(s.str[i]);
+    return s;
 }
-
