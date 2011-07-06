@@ -150,6 +150,13 @@ bool is_directory(const char* path)
     return stat(path, &s) == 0 ? S_ISDIR(s.st_mode) : false;
 }
 
+void touch_file(const char* file_name)
+{
+    FILE* f = fopen(file_name, "a");
+    if (f)
+        fclose(f);
+}
+
 const char* get_home_dir(void)
 {
      const char* home = getenv("HOME");
@@ -564,9 +571,7 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 
 void save_config(void)
 {
-    FILE* f = fopen(action_file, "w"); // touch file
-    if (f)
-        fclose(f);
+    touch_file(config_file);
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
     {
@@ -600,10 +605,7 @@ void read_config(void)
 
 void save_actions(void)
 {
-    FILE* f = fopen(action_file, "w"); // touch file
-    if (f)
-        fclose(f);
-
+    touch_file(action_file);
     GKeyFile* kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL))
         for (size_t i = 0; i < action_list_size; i++)
