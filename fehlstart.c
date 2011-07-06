@@ -1,7 +1,8 @@
 /*
 *   fehlstart - a small launcher written in gnu c99
-*   this source is publieshed under the GPLv3 license.
-*   copyright 2011 maep
+*   this source is published under the GPLv3 license.
+*   get the license from: http://www.gnu.org/licenses/gpl-3.0.txt
+*   copyright 2011 maep and contributors
 */
 
 #define _GNU_SOURCE // for strcasestr function
