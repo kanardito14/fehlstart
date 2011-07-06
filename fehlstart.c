@@ -150,13 +150,6 @@ bool is_directory(const char* path)
     return stat(path, &s) == 0 ? S_ISDIR(s.st_mode) : false;
 }
 
-void touch_file(const char* file_name)
-{
-    FILE* f = fopen(file_name, "a");
-    if (f)
-        fclose(f);
-}
-
 const char* get_home_dir(void)
 {
      const char* home = getenv("HOME");
@@ -565,22 +558,31 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 //------------------------------------------
 // config files
 
+void key_file_save(GKeyFile* kf, const char* file_name)
+{
+    FILE* f = fopen(file_name, "w");
+    if (!f)
+        return;
+    gsize length = 0;
+    gchar* data = g_key_file_to_data(kf, &length, NULL);
+    fwrite(data, 1, length, f);
+    g_free(data);
+    fclose(f);
+}
+
 // macro for writing to keyfile
 #define WRITE_PREF(type, group, key, var) \
     g_key_file_set_##type (kf, group, key, prefs.var)
 
 void save_config(void)
 {
-    touch_file(config_file);
-    GKeyFile *kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
-    {
-        WRITE_PREF(string, "Bindings", "launch", hotkey);
-        WRITE_PREF(boolean, "Matching", "strict", strict_matching);
-        WRITE_PREF(boolean, "Matching", "executable", match_executable);
-        WRITE_PREF(uint64, "Update", "interval", update_timeout);
-        WRITE_PREF(boolean, "Icons", "show", show_icon);
-    }
+    GKeyFile* kf = g_key_file_new();
+    WRITE_PREF(string, "Bindings", "launch", hotkey);
+    WRITE_PREF(boolean, "Matching", "strict", strict_matching);
+    WRITE_PREF(boolean, "Matching", "executable", match_executable);
+    WRITE_PREF(uint64, "Update", "interval", update_timeout);
+    WRITE_PREF(boolean, "Icons", "show", show_icon);
+    key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
 
@@ -605,16 +607,14 @@ void read_config(void)
 
 void save_actions(void)
 {
-    touch_file(action_file);
     GKeyFile* kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL))
-        for (size_t i = 0; i < action_list_size; i++)
-        {
-            Action* a = action_list + i;
-            if (a->short_key.len > 0)
-                g_key_file_set_string(kf, a->name.str, "short_key", a->short_key.str);
-        }
-
+    for (size_t i = 0; i < action_list_size; i++)
+    {
+        Action* a = action_list + i;
+        if (a->short_key.len > 0)
+            g_key_file_set_string(kf, a->name.str, "short_key", a->short_key.str);
+    }
+    key_file_save(kf, action_file);
     g_key_file_free(kf);
 }
 
