@@ -200,8 +200,11 @@ bool load_launcher(String file_name, Launch* launcher)
         str = g_app_info_get_name(G_APP_INFO(info));
         launcher->name = str_new(str);
         // get executable
-        str = g_app_info_get_executable(G_APP_INFO(info));
-        launcher->executable = str_new(str);
+        if (prefs.match_executable)
+        {
+            str = g_app_info_get_executable(G_APP_INFO(info));
+            launcher->executable = str_new(str);
+        }
         // get icon
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
         String icon = STR_S("applications-other");
