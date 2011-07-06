@@ -7,15 +7,17 @@ PKGS := keybinder gio-unix-2.0
 INCS := $(shell pkg-config --cflags $(PKGS))
 LIBS := $(shell pkg-config --libs $(PKGS))
 
-CFLAGS	:= -Wall -Wextra -std=gnu99 $(INCS) $(CFLAGS)
+CFLAGS	:= -Wall -std=gnu99 -Wextra $(INCS) $(CFLAGS)
 LDFLAGS	:= $(LIBS) $(LDFLAGS)
 
 SRCS := $(wildcard *.c)
 OBJS := $(SRCS:.c=.o)
 
+#release flags
 all: CC += -DNDEBUG -O2
 all: fehlstart
 
+#debug flags
 debug: CC += -DDEBUG -g
 debug: fehlstart
 

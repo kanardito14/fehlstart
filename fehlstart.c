@@ -56,6 +56,8 @@ typedef struct
     String icon;
 } Launch;
 
+#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
+
 typedef struct Action_
 {
     String name;
@@ -66,6 +68,8 @@ typedef struct Action_
     void*  data;
     void (*action) (String, struct Action_*);
 } Action;
+
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, 0, 0}
 
 //------------------------------------------
 // forward declarations
@@ -250,7 +254,7 @@ void populate_launch_list(String dir_name)
         if (str_ends_with_i(file_name, STR_S(".desktop")))
         {
             String full_path = assemble_path(dir_name, file_name);
-            Launch launcher;
+            Launch launcher = LAUNCH_INITIALIZER;
             if (load_launcher(full_path, &launcher))
                 add_launcher(launcher);
             else
@@ -663,7 +667,6 @@ void update_action(String command, Action* action)
     update_launch_list();
     update_action_list();
     load_actions();
-    malloc_stats();
 }
 
 void launch_action(String command, Action* action)
