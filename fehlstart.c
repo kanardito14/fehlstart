@@ -801,6 +801,7 @@ int main (int argc, char** argv)
 {
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
+    g_thread_init(NULL);
 
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
