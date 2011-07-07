@@ -747,7 +747,7 @@ static void create_widgets(void)
 static const char* get_desktop_env(void)
 {
     // replacing strcasestr, but it's a gnu extension, b must be a static cstring
-    #define _CONTAINS(a, b) str_contains(str_wrap(a), STR_S(b))
+    #define _CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
     char* kde1 = getenv("KDE_FULL_SESSION");
