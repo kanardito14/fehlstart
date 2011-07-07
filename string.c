@@ -12,7 +12,7 @@
 #include "string.h"
 
 // No sense in including all of glib for this, make use of gcc
-#define MIN(a, b)  ({ typeof(a) _a = (a); typeof(b) _b = (b); _a < _b ? _a : _b; })
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 String str_wrap_n(const char* s, uint32_t n)
 {

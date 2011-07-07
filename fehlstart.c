@@ -5,8 +5,6 @@
 *   copyright 2011 maep and contributors
 */
 
-#define _GNU_SOURCE // for strcasestr function
-
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
@@ -70,14 +68,14 @@ typedef struct Action_
     void (*action) (String, struct Action_*);
 } Action;
 
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, 0, 0}
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
 
-void update_action(String, Action*);
-void quit_action(String, Action*);
-void launch_action(String, Action*);
+static void update_action(String, Action*);
+static void quit_action(String, Action*);
+static void launch_action(String, Action*);
 
 //------------------------------------------
 // build-in actions
@@ -137,25 +135,13 @@ static GtkWidget* image = NULL;
 static GtkWidget* action_label = NULL;
 static GtkWidget* input_label = NULL;
 
-char* config_file = 0;
-char* action_file = 0;
+static char* config_file = 0;
+static char* action_file = 0;
 
 //------------------------------------------
 // helper functions
 
-bool is_file(const char* path)
-{
-    struct stat s;
-    return stat(path, &s) == 0 ? S_ISREG(s.st_mode) : false;
-}
-
-bool is_directory(const char* path)
-{
-    struct stat s;
-    return stat(path, &s) == 0 ? S_ISDIR(s.st_mode) : false;
-}
-
-const char* get_home_dir(void)
+static const char* get_home_dir(void)
 {
      const char* home = getenv("HOME");
      if (!home)
@@ -163,7 +149,7 @@ const char* get_home_dir(void)
     return home;
 }
 
-String get_first_input_word(void)
+static String get_first_input_word(void)
 {
     for (uint32_t i = 0;i < input_string_size; i++)
         if (input_string[i] == ' ')
@@ -174,7 +160,7 @@ String get_first_input_word(void)
 //------------------------------------------
 // launcher function
 
-void add_launcher(Launch launch)
+static void add_launcher(Launch launch)
 {
     if (launch_list_size + 1 > launch_list_capacity)
     {
@@ -185,7 +171,7 @@ void add_launcher(Launch launch)
     launch_list_size++;
 }
 
-bool load_launcher(String file_name, Launch* launcher)
+static bool load_launcher(String file_name, Launch* launcher)
 {
     GKeyFile* file = g_key_file_new();
     g_key_file_load_from_file(file, file_name.str, G_KEY_FILE_NONE, 0);
@@ -233,7 +219,7 @@ bool load_launcher(String file_name, Launch* launcher)
     return used;
 }
 
-void free_launcher(Launch* launcher)
+static void free_launcher(Launch* launcher)
 {
     str_free(launcher->file);
     str_free(launcher->name);
@@ -241,7 +227,7 @@ void free_launcher(Launch* launcher)
     str_free(launcher->icon);
 }
 
-void populate_launch_list(String dir_name)
+static void populate_launch_list(String dir_name)
 {
     DIR* dir = opendir(dir_name.str);
     if (dir == 0)
@@ -265,14 +251,14 @@ void populate_launch_list(String dir_name)
     closedir(dir);
 }
 
-void clear_launch_list(void)
+static void clear_launch_list(void)
 {
     for (uint32_t i = 0; i < launch_list_size; i++)
         free_launcher(launch_list + i);
     launch_list_size = 0;
 }
 
-void update_launch_list(void)
+static void update_launch_list(void)
 {
     clear_launch_list();
     populate_launch_list(STR_S(APPLICATIONS_DIR));
@@ -290,7 +276,7 @@ void update_launch_list(void)
 //------------------------------------------
 // action functions
 
-void add_action(Action* action)
+static void add_action(Action* action)
 {
     if (action_list_size + 1 > action_list_capacity)
     {
@@ -301,19 +287,19 @@ void add_action(Action* action)
     action_list_size++;
 }
 
-void clear_action_list(void)
+static void clear_action_list(void)
 {
     for (uint32_t i = 0; i < action_list_size; i++)
         str_free(action_list[i].short_key);
     action_list_size = 0;
 }
 
-int cmp_action_name(const void* a, const void* b)
+inline static int cmp_action_name(const void* a, const void* b)
 {
     return str_compare_i(((Action*)a)->name, ((Action*)b)->name);
 }
 
-void update_action_list(void)
+static void update_action_list(void)
 {
     clear_action_list();
     for (size_t i = 0; i < launch_list_size; i++)
@@ -337,7 +323,7 @@ void update_action_list(void)
 }
 
 // calculates a score that determines in which order the results are displayed
-void update_action_score(Action* action, String filter)
+static void update_action_score(Action* action, String filter)
 {
     int score = -1;
     if (str_starts_with(action->short_key, filter))
@@ -359,12 +345,12 @@ void update_action_score(Action* action, String filter)
     action->score = score;
 }
 
-int cmp_action_score(const void* a, const void* b)
+inline static int cmp_action_score(const void* a, const void* b)
 {
     return (*((Action**)b))->score - (*((Action**)a))->score;
 }
 
-void filter_action_list(String filter)
+static void filter_action_list(String filter)
 {
     if (filter.len == 0)
         return;
@@ -388,7 +374,7 @@ void filter_action_list(String filter)
     g_static_mutex_unlock(&lists_mutex);
 }
 
-void run_selected(void)
+static void run_selected(void)
 {
     g_static_mutex_lock(&lists_mutex);
                                 // check in case async list update fails
@@ -410,7 +396,7 @@ void run_selected(void)
 //------------------------------------------
 // gui functions
 
-void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
+static void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
 {
     if (!prefs.show_icon)
         return;
@@ -430,7 +416,7 @@ void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
     g_object_unref(icon);
 }
 
-void show_selected(void)
+static void show_selected(void)
 {
     const char* action_text = NO_MATCH_MESSAGE;
     String icon_name = STR_S(NO_MATCH_ICON);
@@ -457,7 +443,7 @@ void show_selected(void)
     gtk_widget_queue_draw(image);
 }
 
-void handle_text_input(GdkEventKey* event)
+static void handle_text_input(GdkEventKey* event)
 {
     if (event->keyval == GDK_KEY_BackSpace && input_string_size > 0)
         input_string_size--;
@@ -471,7 +457,7 @@ void handle_text_input(GdkEventKey* event)
     filter_list_choice = 0;
 }
 
-void hide_window(void)
+static void hide_window(void)
 {
     if (!gtk_widget_get_visible(window))
         return;
@@ -491,12 +477,24 @@ void hide_window(void)
     }
 }
 
-void show_window(void)
+// not part of posix, so I stole it from
+// http://www.rajivchakravorty.com/source-code/.tmp/snort-html/timersub_8h-source.html
+#define TIMERSUB(a, b, result)                              \
+    do {                                                    \
+        (result)->tv_sec = (a)->tv_sec - (b)->tv_sec;       \
+        (result)->tv_usec = (a)->tv_usec - (b)->tv_usec;    \
+        if ((result)->tv_usec < 0) {                        \
+            --(result)->tv_sec;                             \
+            (result)->tv_usec += 1000000;                   \
+        }                                                   \
+    } while (0)
+
+static void show_window(void)
 {
     // cope with x stealing focus
     struct timeval now, elapsed;
     gettimeofday(&now, 0);
-    timersub(&now, &last_hide, &elapsed);
+    TIMERSUB(&now, &last_hide, &elapsed);
     bool x11_sucks = (elapsed.tv_sec == 0 && elapsed.tv_usec < SHOW_IGNORE_TIME);
 
     if (!x11_sucks && !gtk_widget_get_visible(window))
@@ -509,7 +507,7 @@ void show_window(void)
     }
 }
 
-void toggle_window(const char *keystring, void *data)
+static void toggle_window(const char *keystring, void *data)
 {
     if (gtk_widget_get_visible(window))
         hide_window();
@@ -517,23 +515,23 @@ void toggle_window(const char *keystring, void *data)
         show_window();
 }
 
-void destroy(GtkWidget* widget, gpointer data)
+static void destroy(GtkWidget* widget, gpointer data)
 {
     gtk_main_quit();
 }
 
-gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
+static gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
 {
     return true;
 }
 
-gboolean focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer data)
+static gboolean focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer data)
 {
     hide_window();
     return true;
 }
 
-gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
+static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 {
     switch (event->keyval)
     {
@@ -566,7 +564,7 @@ gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 //------------------------------------------
 // config files
 
-void key_file_save(GKeyFile* kf, const char* file_name)
+static void key_file_save(GKeyFile* kf, const char* file_name)
 {
     FILE* f = fopen(file_name, "w");
     if (!f)
@@ -582,7 +580,7 @@ void key_file_save(GKeyFile* kf, const char* file_name)
 #define WRITE_PREF(type, group, key, var) \
     g_key_file_set_##type (kf, group, key, prefs.var)
 
-void save_config(void)
+static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
     WRITE_PREF(string, "Bindings", "launch", hotkey);
@@ -599,7 +597,7 @@ void save_config(void)
     if (g_key_file_has_key(kf, group, key, NULL))   \
         prefs.var = g_key_file_get_##type (kf, group, key, NULL)
 
-void read_config(void)
+static void read_config(void)
 {
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
@@ -613,7 +611,7 @@ void read_config(void)
     g_key_file_free(kf);
 }
 
-void save_actions(void)
+static void save_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
     for (size_t i = 0; i < action_list_size; i++)
@@ -643,7 +641,7 @@ void load_actions(void)
     g_key_file_free(kf);
 }
 
-void init_config_files(void)
+static void init_config_files(void)
 {
     gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
     g_mkdir_with_parents(dir, 0700);
@@ -657,12 +655,12 @@ void init_config_files(void)
 //------------------------------------------
 // actions
 
-void quit_action(String command, Action* action)
+static void quit_action(String command, Action* action)
 {
     gtk_main_quit();
 }
 
-void update_action(String command, Action* action)
+static void update_action(String command, Action* action)
 {
     save_actions();
     update_launch_list();
@@ -670,7 +668,7 @@ void update_action(String command, Action* action)
     load_actions();
 }
 
-void launch_action(String command, Action* action)
+static void launch_action(String command, Action* action)
 {
     pid_t pid = fork();
     if (pid != 0)
@@ -693,7 +691,7 @@ void launch_action(String command, Action* action)
 //------------------------------------------
 // misc
 
-void register_hotkey(void)
+static void register_hotkey(void)
 {
     if (!prefs.one_time)
     {
@@ -704,7 +702,7 @@ void register_hotkey(void)
 }
 
 // gets run periodically
-bool update_lists_cb(void *data)
+static bool update_lists_cb(void *data)
 {
     if (g_static_mutex_trylock(&lists_mutex))
     {
@@ -714,13 +712,13 @@ bool update_lists_cb(void *data)
     return true;
 }
 
-void run_updates(void)
+static void run_updates(void)
 {
     if (prefs.update_timeout && !prefs.one_time)
         g_timeout_add_seconds(60 * prefs.update_timeout, (GSourceFunc) update_lists_cb, NULL);
 }
 
-void create_widgets(void)
+static void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -751,8 +749,10 @@ void create_widgets(void)
     gtk_widget_show(input_label);
 }
 
-const char* get_desktop_env(void)
+static const char* get_desktop_env(void)
 {
+    // replacing strcasestr, but it's a gnu extension, b must be a static cstring
+    #define _CONTAINS(a, b) str_contains(str_wrap(a), STR_S(b))
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
     char* kde1 = getenv("KDE_FULL_SESSION");
@@ -761,27 +761,28 @@ const char* get_desktop_env(void)
     char* current_desktop = getenv("XDG_CURRENT_DESKTOP");
     char* xdg_prefix = getenv("XDG_MENU_PREFIX");
 
-    session = session ? : "";
-    xdg_prefix = xdg_prefix ? : "";
-    current_desktop = current_desktop ? : "";
+    session = session ? session : "";
+    xdg_prefix = xdg_prefix ? xdg_prefix : "";
+    current_desktop = current_desktop ? current_desktop : "";
 
     const char* desktop = "Old";
-    if (strcasestr(session, "kde") || kde0 != NULL || kde1 != NULL)
+    if (_CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
-    else if (strcasestr(session, "gnome") || gnome != NULL)
+    else if (_CONTAINS(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
-    else if (strcasestr(session, "xfce") || strcasestr(xdg_prefix, "xfce"))
+    else if (_CONTAINS(session, "xfce") || _CONTAINS(xdg_prefix, "xfce"))
         desktop = "XFCE";
-    else if (strcasestr(session, "lxde") || strcasestr(current_desktop, "lxde"))
+    else if (_CONTAINS(session, "lxde") || _CONTAINS(current_desktop, "lxde"))
         desktop = "LXDE";
-    else if (strcasestr(session, "rox"))
+    else if (_CONTAINS(session, "rox"))
         desktop = "ROX";
 
     printf("detected desktop: %s\n", desktop);
     return desktop;
+    #undef _CONTAINS
 }
 
-void parse_commandline(int argc, char** argv)
+static void parse_commandline(int argc, char** argv)
 {
     for (int i = 1; i < argc; i++)
     {
