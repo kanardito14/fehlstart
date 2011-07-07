@@ -578,6 +578,7 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
+    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL); // keep comments
     WRITE_PREF(string, "Bindings", "launch", hotkey);
     WRITE_PREF(boolean, "Matching", "strict", strict_matching);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
