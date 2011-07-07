@@ -5,20 +5,13 @@
 *   copyright 2011 maep and contributors
 */
 
-#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 
-#include <malloc.h>
 #include <dirent.h>
-#include <unistd.h>
 #include <signal.h>
 
 #include <sys/time.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
@@ -36,9 +29,11 @@
 #define DEFAULT_HOTKEY      "<Super>space"
 #define WINDOW_WIDTH        200
 #define WINDOW_HEIGHT       100
+
+#define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 #define DEFAULT_ICON        GTK_STOCK_FIND
 #define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
-#define ICON_SIZE           GTK_ICON_SIZE_DIALOG
+#define APPLICATION_ICON    "applications-other"
 
 #define APPLICATIONS_DIR                "/usr/share/applications"
 #define USER_APPLICATIONS_DIR           ".local/share/applications"
@@ -198,7 +193,7 @@ static bool load_launcher(String file_name, Launch* launcher)
         }
         // get icon
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        String icon = STR_S("applications-other");
+        String icon = STR_S(APPLICATION_ICON);
         if (str)
         {
             icon = str_wrap(str);
