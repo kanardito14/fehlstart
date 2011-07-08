@@ -93,7 +93,7 @@ static Action actions[NUM_ACTIONS] = {
 static struct
 {
     gchar *hotkey;
-    guint64 update_timeout;
+    gint update_timeout;
     bool strict_matching;
     bool match_executable;
     bool show_icon;
@@ -267,7 +267,8 @@ static void add_launchers_from_commands(void)
     gchar** groups = g_key_file_get_groups(kf, NULL);
     for (size_t i = 0; groups[i]; i++)
     {
-        Launch launch = {STR_I("!command"), // mark as command
+        Launch launch = {
+            STR_I("!command"), // mark as command
             str_new(groups[i]),
             str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
             str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL))
@@ -457,11 +458,11 @@ static void show_selected(void)
 
 static void handle_text_input(GdkEventKey* event)
 {
-    if (event->keyval == GDK_KEY_BackSpace && input_string_size > 0)
+    if (event->keyval == GDK_BackSpace && input_string_size > 0)
         input_string_size--;
     else if (event->length == 1
         && (input_string_size + 1) < INPUT_STRING_SIZE
-        && (input_string_size > 0 || event->keyval != GDK_KEY_space))
+        && (input_string_size > 0 || event->keyval != GDK_space))
         input_string[input_string_size++] = event->keyval;
 
     input_string[input_string_size] = 0;
@@ -520,20 +521,20 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
 {
     switch (event->keyval)
     {
-        case GDK_KEY_Escape:
+        case GDK_Escape:
             hide_window();
         break;
-        case GDK_KEY_Return:
+        case GDK_Return:
             run_selected();
             hide_window();
         break;
-        case GDK_KEY_Up:
+        case GDK_Up:
             filter_list_choice += (filter_list_size - 1);
             filter_list_choice %= filter_list_size;
             show_selected();
         break;
-        case GDK_KEY_Tab:
-        case GDK_KEY_Down:
+        case GDK_Tab:
+        case GDK_Down:
             filter_list_choice++;
             filter_list_choice %= filter_list_size;
             show_selected();
@@ -572,7 +573,7 @@ static void save_config(void)
     WRITE_PREF(string, "Bindings", "launch", hotkey);
     WRITE_PREF(boolean, "Matching", "strict", strict_matching);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
-    WRITE_PREF(uint64, "Update", "interval", update_timeout);
+    WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
@@ -591,7 +592,7 @@ static void read_config(void)
         READ_PREF(string, "Bindings", "launch", hotkey);
         READ_PREF(boolean, "Matching", "strict", strict_matching);
         READ_PREF(boolean, "Matching", "executable", match_executable);
-        READ_PREF(uint64, "Update", "interval", update_timeout);
+        READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
     }
     g_key_file_free(kf);
@@ -655,7 +656,7 @@ static void reload_settings_and_actions(void)
 // opens file in an editor and returns immediately
 // the plan was that run_editor only returns after the editor exits.
 // that way I could reload the settings after changes have been made.
-// but xdg-open and friends return imediately so that plan is spoiled :(
+// but xdg-open and friends return immediately so that plan was spoiled :(
 static void run_editor(const char* file)
 {
     if (!is_readable_file(file))

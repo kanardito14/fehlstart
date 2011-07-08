@@ -15,7 +15,7 @@ typedef struct
     bool can_free;
 } String;
 
-// string "constructor" for creating strings with no runtime overhead at comile time
+// string "constructor" for creating strings with no runtime overhead at compile time
 // for static strings
 #define STR_S(arg) ((String) {(arg), sizeof(arg) - 1, false})
 // for initializer lists, etc
