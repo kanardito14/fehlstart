@@ -340,7 +340,7 @@ static void update_action_score(Action* action, String filter)
 {
     int score = -1;
     if (str_starts_with(action->short_key, filter))
-        score = 10000 + (INPUT_STRING_SIZE - filter.len);
+        score = 10000 + (INPUT_STRING_SIZE - action->short_key.len);
 
     if (score < 0)
     {
