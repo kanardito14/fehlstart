@@ -846,7 +846,7 @@ static void commands_action(String command, Action* action)
         FILE* f = fopen(commands_file, "w");
         if (!f)
             return;
-        fputs("#example: 'run top' would louch top in xterm\n"\
+        fputs("#example: 'run top' would start top in xterm\n"\
             "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
         fclose(f);
     }
