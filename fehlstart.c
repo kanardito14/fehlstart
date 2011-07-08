@@ -409,24 +409,28 @@ static void run_selected(void)
 //------------------------------------------
 // gui functions
 
-static void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
+static gpointer set_icon_thread(gpointer data)
 {
-    if (!prefs.show_icon)
-        return;
-
-    GIcon* icon = 0;
-    if (g_path_is_absolute(name))
+    const char* name = (const char*)data;
+    if (prefs.show_icon)
     {
-          GFile* file;
-          file = g_file_new_for_path(name);
-          icon = g_file_icon_new(file);
-          g_object_unref(file);
-    }
-    else
-        icon = g_themed_icon_new_with_default_fallbacks(name);
+        gdk_threads_enter();
+        GIcon* icon = 0;
+        if (g_path_is_absolute(name))
+        {
+              GFile* file = g_file_new_for_path(name);
+              icon = g_file_icon_new(file);
+              g_object_unref(file);
+        }
+        else
+            icon = g_themed_icon_new_with_default_fallbacks(name);
 
-    gtk_image_set_from_gicon(img, icon, size);
-    g_object_unref(icon);
+        gtk_image_set_from_gicon(GTK_IMAGE(image), icon, ICON_SIZE);
+        gtk_widget_queue_draw(image);
+        g_object_unref(icon);
+        gdk_threads_leave();
+    }
+    return NULL;
 }
 
 static void show_selected(void)
@@ -451,9 +455,7 @@ static void show_selected(void)
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
     gtk_widget_queue_draw(input_label);
     gtk_widget_queue_draw(action_label);
-
-    image_set_from_name(GTK_IMAGE(image), icon_name.str, ICON_SIZE);
-    gtk_widget_queue_draw(image);
+    g_thread_create(set_icon_thread, icon_name.str, false, NULL);
 }
 
 static void handle_text_input(GdkEventKey* event)
@@ -718,7 +720,7 @@ static void create_widgets(void)
     gtk_widget_show(vbox);
 
     image = gtk_image_new();
-    image_set_from_name(GTK_IMAGE(image), DEFAULT_ICON, ICON_SIZE);
+    gtk_image_set_from_icon_name(GTK_IMAGE(image), DEFAULT_ICON, ICON_SIZE);
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
     gtk_widget_show(image);
 
@@ -858,9 +860,11 @@ static void commands_action(String command, Action* action)
 
 int main (int argc, char** argv)
 {
+    g_thread_init(NULL);
+    gdk_threads_init();
+
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
-    g_thread_init(NULL);
 
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
@@ -880,7 +884,9 @@ int main (int argc, char** argv)
     register_hotkey();
     run_updates();
 
+    gdk_threads_enter();
     gtk_main();
+    gdk_threads_leave();
 
     return EXIT_SUCCESS;
 }
