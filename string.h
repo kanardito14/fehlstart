@@ -23,13 +23,16 @@ typedef struct
 
 #define STR_END UINT32_MAX
 
-// wrap a zero terminated c string
+// wrap a zero terminated string
 String str_wrap(const char* s);
 
-// wrap a c string of length len
+// wrap a string of length len
 String str_wrap_n(const char* s, uint32_t len);
 
-// create a new string from a zero terminated c string
+// wrap a zero terminated string, and take ownership
+String str_own(const char* s);
+
+// create a new string from a zero terminated string
 // must be freed with str_free()
 String str_new(const char* s);
 
@@ -53,17 +56,21 @@ String str_concat(String a, String b);
 // example 1: "/foo" "bar" -> "/foo/bar"
 // example 2: "/foo/" "bar" -> "/foo/bar"
 // must be freed with str_free()
-String assemble_path(String a, String b);
+String str_assemble_path(String a, String b);
 
 // create substring, using same memory as s
 String str_substring(String s, uint32_t begin, uint32_t length);
 
+// return true if equal, case sensitive
+bool str_equals(String a, String b);
 
 // returns true if s contains what, case sensitive
 bool str_contains(String s, String what);
 // returns true if s contains what, not case sensitive
 bool str_contains_i(String s, String what);
-// find first match of what, returns STR_END if no match was found
+// returns STR_END if no match was found, case sensitive
+uint32_t str_find_first(String s, String what);
+// returns STR_END if no match was found, not case sensitive
 uint32_t str_find_first_i(String s, String what);
 
 

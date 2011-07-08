@@ -46,23 +46,23 @@
 
 typedef struct
 {
-    String file;
-    String name;
-    String executable;
-    String icon;
+    String  file;
+    String  name;
+    String  executable;
+    String  icon;
 } Launch;
 
 #define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
 
 typedef struct Action_
 {
-    String name;
-    String hidden_key;
-    String short_key;
-    String icon;
-    int score;
-    void*  data;
-    void (*action) (String, struct Action_*);
+    String  name;
+    String  hidden_key;
+    String  short_key;
+    String  icon;
+    int     score;
+    void*   data;
+    void    (*action) (String, struct Action_*);
 } Action;
 
 #define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
@@ -70,23 +70,24 @@ typedef struct Action_
 //------------------------------------------
 // forward declarations
 
-static void update_action(String, Action*);
-static void quit_action(String, Action*);
 static void launch_action(String, Action*);
 static void settings_action(String, Action*);
+static void commands_action(String, Action*);
+static void update_action(String, Action*);
+static void quit_action(String, Action*);
 
 //------------------------------------------
 // build-in actions
 
-#define NUM_ACTIONS 3
+#define _ACTION(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, 0 , action}
+#define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
-    {STR_I("update fehlstart"), STR_I(""), STR_I(""),
-        STR_I(GTK_STOCK_REFRESH), 0, 0 , update_action},
-    {STR_I("quit fehlstart"), STR_I(""), STR_I(""),
-        STR_I(GTK_STOCK_QUIT), 0, 0, quit_action},
-    {STR_I("fehlstart settings"), STR_I("config preferences"), STR_I(""),
-        STR_I(GTK_STOCK_PREFERENCES), 0, 0, settings_action}
+    _ACTION("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
+    _ACTION("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action),
+    _ACTION("edit settings", "config preferences", GTK_STOCK_PREFERENCES, settings_action),
+    _ACTION("edit commands", "", GTK_STOCK_EXECUTE, commands_action)
 };
+#undef _ACTION
 
 //------------------------------------------
 // global variables
@@ -139,10 +140,19 @@ static GtkWidget* input_label = NULL;
 
 static char* config_file = 0;
 static char* action_file = 0;
-static char* user_file = 0;
+static char* commands_file = 0;
+static char* user_app_dir = 0;
 
 //------------------------------------------
 // helper functions
+
+static bool is_readable_file(const char* file)
+{
+    FILE* f = fopen(file, "r");
+    if (f)
+        fclose(f);
+    return f != 0;
+}
 
 static const char* get_home_dir(void)
 {
@@ -201,20 +211,15 @@ static bool load_launcher(String file_name, Launch* launcher)
         }
         // get icon
         str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        String icon = STR_S(APPLICATION_ICON);
-        if (str)
-        {
-            icon = str_wrap(str);
-            // if icon is not a full path but ends with file extension...
-            // the skype package does this, and icon lookup works only without the .png
-            if (!g_path_is_absolute(icon.str)
-                && (str_ends_with_i(icon, STR_S(".png"))
-                || str_ends_with_i(icon, STR_S(".svg"))
-                || str_ends_with_i(icon, STR_S(".xpm"))))
-                icon.len -= 4;
-        }
-        launcher->icon = str_duplicate(icon);
-        g_free((gpointer)str);
+        String icon = (str) ? str_own(str) : STR_S(APPLICATION_ICON);
+        // if icon is not a full path but ends with file extension...
+        // the skype package does this, and icon lookup works only without the .png
+        if (!g_path_is_absolute(icon.str)
+            && (str_ends_with_i(icon, STR_S(".png"))
+            || str_ends_with_i(icon, STR_S(".svg"))
+            || str_ends_with_i(icon, STR_S(".xpm"))))
+            icon.len -= 4;
+        launcher->icon = icon;
     }
 
     g_object_unref(G_OBJECT(info));
@@ -230,7 +235,14 @@ static void free_launcher(Launch* launcher)
     str_free(launcher->icon);
 }
 
-static void populate_launch_list(String dir_name)
+static void clear_launch_list(void)
+{
+    for (uint32_t i = 0; i < launch_list_size; i++)
+        free_launcher(launch_list + i);
+    launch_list_size = 0;
+}
+
+static void add_launchers_from_dir(String dir_name)
 {
     DIR* dir = opendir(dir_name.str);
     if (dir == 0)
@@ -243,7 +255,7 @@ static void populate_launch_list(String dir_name)
         String file_name = str_wrap(ent->d_name);
         if (str_ends_with_i(file_name, STR_S(".desktop")))
         {
-            String full_path = assemble_path(dir_name, file_name);
+            String full_path = str_assemble_path(dir_name, file_name);
             Launch launcher = LAUNCH_INITIALIZER;
             if (load_launcher(full_path, &launcher))
                 add_launcher(launcher);
@@ -254,26 +266,30 @@ static void populate_launch_list(String dir_name)
     closedir(dir);
 }
 
-static void clear_launch_list(void)
+static void add_launchers_from_commands(void)
 {
-    for (uint32_t i = 0; i < launch_list_size; i++)
-        free_launcher(launch_list + i);
-    launch_list_size = 0;
+    GKeyFile* kf = g_key_file_new();
+    g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    gchar** groups = g_key_file_get_groups(kf, NULL);
+    for (size_t i = 0; groups[i]; i++)
+    {
+        Launch launch = {STR_I("!command"), // mark as command
+            str_new(groups[i]),
+            str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
+            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL))
+        };
+        add_launcher(launch);
+    }
+    g_strfreev(groups);
+    g_key_file_free(kf);
 }
 
 static void update_launch_list(void)
 {
     clear_launch_list();
-    populate_launch_list(STR_S(APPLICATIONS_DIR));
-    const char* home = get_home_dir();
-    if (home != 0)
-    {
-        String home_dir = str_wrap(home);
-        String user_dir = STR_S(USER_APPLICATIONS_DIR);
-        String full_path = assemble_path(home_dir, user_dir);
-        populate_launch_list(full_path);
-        str_free(full_path);
-    }
+    add_launchers_from_dir(STR_S(APPLICATIONS_DIR));
+    add_launchers_from_dir(str_wrap(user_app_dir));
+    add_launchers_from_commands();
 }
 
 //------------------------------------------
@@ -586,7 +602,7 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
-    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL); // keep comments
+    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     WRITE_PREF(string, "Bindings", "launch", hotkey);
     WRITE_PREF(boolean, "Matching", "strict", strict_matching);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
@@ -651,6 +667,7 @@ static void init_config_files(void)
     g_mkdir_with_parents(dir, 0700);
     config_file = g_build_filename(dir, "fehlstart.rc", NULL);
     action_file = g_build_filename(dir, "actions.rc", NULL);
+    commands_file = g_build_filename(dir, "commands.rc", NULL);
     g_free(dir);
     atexit(save_config);
     atexit(save_actions);
@@ -670,8 +687,14 @@ static void reload_settings_and_actions(void)
 }
 
 // opens file in an editor and returns immediately
+// the plan was that run_editor only returns after the editor exits.
+// that way I could reload the settings after changes have been made.
+// but xdg-open and friends return imediately so that plan is spoiled :(
 static void run_editor(const char* file)
 {
+    if (!is_readable_file(file))
+        return;
+
     pid_t pid = fork();
     if (pid != 0)
         return;
@@ -680,7 +703,7 @@ static void run_editor(const char* file)
     execlp("xdg-open", "", file, (char*)0);
     execlp("x-terminal-emulator", "", "-e", "editor", file, (char*)0);
     execlp("xterm", "", "-e", "vi", file, (char*)0); // getting desperate
-    printf("failed to open editor for %s\n", file)
+    printf("failed to open editor for %s\n", file);
     exit(EXIT_FAILURE);
 }
 
@@ -783,13 +806,35 @@ static void parse_commandline(int argc, char** argv)
             prefs.one_time = true;
         else if (!strcmp(argv[i], "--help"))
         {
-            printf("fehlstart 0.2.4 (c) 2011 maep\noptions:\n"\
+            printf("fehlstart 0.2.5 (c) 2011 maep\noptions:\n"\
                 "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         }
         else
             printf("invalid option: %s\n", argv[i]);
     }
+}
+
+static void run_launcher(String command, Launch* launch)
+{
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
+    if (info != 0)
+    {
+        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
+        g_object_unref(G_OBJECT(info));
+    }
+}
+
+static void run_command(String command, Launch* launch)
+{
+    // extract args from command
+    uint32_t sp = str_find_first(command, STR_S(" "));
+    String cmd = (sp == STR_END) ?
+        str_duplicate(launch->executable) :
+        str_concat(launch->executable, str_substring(command, sp, STR_END));
+    printf("%s\n", cmd.str);
+    if (system(cmd.str)) {}; // to shut up gcc
+    str_free(cmd);
 }
 
 //------------------------------------------
@@ -815,29 +860,31 @@ static void launch_action(String command, Action* action)
     setsid(); // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
     Launch* launch = action->data;
-    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
-    if (info != 0)
-    {
-        // todo: I'd like to pass arguments here, g_app_info_launch supports
-        // uris and files but that's not really what I'm looking for
-        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
-        g_object_unref(G_OBJECT(info));
-    }
+    if (str_equals(launch->file, STR_S("!command")))
+        run_command(command, launch);
+    else
+        run_launcher(command, launch);
     exit(EXIT_SUCCESS);
-}
-
-static gpointer settings_action_thread(gpointer data)
-{
-    // the plan was that run_editor only returns after the editor exits.
-    // that way I could reload the settings after changes have been made.
-    // but xdg-open and friends return imediately so that plan is spoiled :(
-    run_editor(config_file);
-    return NULL;
 }
 
 static void settings_action(String command, Action* action)
 {
-    g_thread_create(settings_action_thread, 0, false, NULL);
+    save_config();
+    run_editor(config_file);
+}
+
+static void commands_action(String command, Action* action)
+{
+    if (!is_readable_file(commands_file))
+    {
+        FILE* f = fopen(commands_file, "w");
+        if (!f)
+            return;
+        fputs("#example: 'run top' would louch top in xterm\n"\
+            "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
+        fclose(f);
+    }
+    run_editor(commands_file);
 }
 
 //------------------------------------------
@@ -852,6 +899,7 @@ int main (int argc, char** argv)
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
     g_desktop_app_info_set_desktop_env(get_desktop_env());
+    user_app_dir = g_build_filename(get_home_dir(), USER_APPLICATIONS_DIR, NULL);
 
     init_config_files();
     read_config();

@@ -14,19 +14,35 @@
 // No sense in including all of glib for this, make use of gcc
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
+inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
+{
+    if (!s)
+        return STR_S("");
+    if (n == STR_END)
+        n = strlen(s);
+    if (n == 0)
+        return STR_S("");
+    return (String) {(char*)s, n, can_free};
+}
+
 String str_wrap_n(const char* s, uint32_t n)
 {
-    return (s == 0 || n == 0) ? STR_S("") : ((String) {(char*)s, n, false});
+    return str_wrap_impl(s, n, false);
 }
 
 String str_wrap(const char* s)
 {
-    return str_wrap_n(s, s != 0 ? strlen(s) : 0);
+    return str_wrap_impl(s, STR_END, false);
+}
+
+String str_own(const char* s)
+{
+    return str_wrap_impl(s, STR_END, true);
 }
 
 String str_create(uint32_t len)
 {
-    return ((String) {calloc(len + 1, 1), len, true});
+    return (String) {calloc(len + 1, 1), len, true};
 }
 
 String str_new(const char* s)
@@ -57,7 +73,7 @@ String str_concat(String a, String b)
     return dst;
 }
 
-String assemble_path(String prefix, String suffix)
+String str_assemble_path(String prefix, String suffix)
 {
     String path = str_create(prefix.len + suffix.len + 1);
 
@@ -104,6 +120,11 @@ static uint32_t str_find_first_impl(String s, String what, int (*dif) (char, cha
     return STR_END;
 }
 
+uint32_t str_find_first(String s, String what)
+{
+    return str_find_first_impl(s, what, cdiff_s);
+}
+
 uint32_t str_find_first_i(String s, String what)
 {
     return str_find_first_impl(s, what, cdiff_i);
@@ -139,6 +160,11 @@ static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
         if (dif(s.str[s.len - i], suffix.str[suffix.len - i]))
             return false;
     return true;
+}
+
+bool str_equals(String a, String b)
+{
+    return (a.len == b.len) && str_starts_with_impl(a, b, cdiff_s);
 }
 
 bool str_starts_with(String s, String prefix)
