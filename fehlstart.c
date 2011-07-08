@@ -12,9 +12,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include <sys/wait.h>
-#include <sys/time.h>
-
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
 #include <glib/gstdio.h>
@@ -128,9 +125,6 @@ static char input_string[INPUT_STRING_SIZE];
 static uint32_t input_string_size = 0;
 
 static GStaticMutex lists_mutex = G_STATIC_MUTEX_INIT;
-
-// workaround for the focus_out_event bug
-static struct timeval last_hide = {0, 0};
 
 // gtk widgets
 static GtkWidget* window = NULL;
@@ -408,7 +402,6 @@ static void run_selected(void)
             action->action(str, action);
         }
     }
-
     g_static_mutex_unlock(&lists_mutex);
 }
 
@@ -485,45 +478,24 @@ static void hide_window(void)
 
     if (prefs.one_time) // configured for one-time use
         gtk_main_quit();
-    else
-    {
-        gtk_widget_hide(window);
-        input_string[0] = 0;
-        input_string_size = 0;
-        filter_list_size = 0;
-        filter_list_choice = 0;
-        gettimeofday(&last_hide, 0);
-    }
-}
 
-// not part of posix, so I stole it from
-// http://www.rajivchakravorty.com/source-code/.tmp/snort-html/timersub_8h-source.html
-#define TIMERSUB(a, b, result)                              \
-    do {                                                    \
-        (result)->tv_sec = (a)->tv_sec - (b)->tv_sec;       \
-        (result)->tv_usec = (a)->tv_usec - (b)->tv_usec;    \
-        if ((result)->tv_usec < 0) {                        \
-            --(result)->tv_sec;                             \
-            (result)->tv_usec += 1000000;                   \
-        }                                                   \
-    } while (0)
+    gtk_widget_hide(window);
+    input_string[0] = 0;
+    input_string_size = 0;
+    filter_list_size = 0;
+    filter_list_choice = 0;
+}
 
 static void show_window(void)
 {
-    // cope with x stealing focus
-    struct timeval now, elapsed;
-    gettimeofday(&now, 0);
-    TIMERSUB(&now, &last_hide, &elapsed);
-    bool x11_sucks = (elapsed.tv_sec == 0 && elapsed.tv_usec < SHOW_IGNORE_TIME);
+    if (gtk_widget_get_visible(window))
+        return;
 
-    if (!x11_sucks && !gtk_widget_get_visible(window))
-    {
-        show_selected();
-        gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
-        gtk_window_present(GTK_WINDOW(window));
-        gtk_window_set_keep_above(GTK_WINDOW(window), true);
-        gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
-    }
+    show_selected();
+    gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
+    gtk_window_present(GTK_WINDOW(window));
+    gtk_window_set_keep_above(GTK_WINDOW(window), true);
+    gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
 }
 
 static void toggle_window(const char *keystring, void *data)
@@ -541,12 +513,6 @@ static void destroy(GtkWidget* widget, gpointer data)
 
 static gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
 {
-    return true;
-}
-
-static gboolean focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer data)
-{
-    hide_window();
     return true;
 }
 
@@ -745,7 +711,6 @@ static void create_widgets(void)
     g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), 0);
     g_signal_connect(window, "destroy", G_CALLBACK(destroy), 0);
     g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), 0);
-    g_signal_connect(window, "focus-out-event", G_CALLBACK(focus_out_event), 0);
 
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
