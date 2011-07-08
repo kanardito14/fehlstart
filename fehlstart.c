@@ -10,7 +10,9 @@
 
 #include <dirent.h>
 #include <signal.h>
+#include <unistd.h>
 
+#include <sys/wait.h>
 #include <sys/time.h>
 
 #include <gtk/gtk.h>
@@ -71,14 +73,19 @@ typedef struct Action_
 static void update_action(String, Action*);
 static void quit_action(String, Action*);
 static void launch_action(String, Action*);
+static void settings_action(String, Action*);
 
 //------------------------------------------
 // build-in actions
 
-#define NUM_ACTIONS 2
+#define NUM_ACTIONS 3
 static Action actions[NUM_ACTIONS] = {
-    {STR_I("update fehlstart"), STR_I(""), STR_I(""), STR_I(GTK_STOCK_REFRESH), 0, 0 , update_action},
-    {STR_I("quit fehlstart"), STR_I(""), STR_I(""), STR_I(GTK_STOCK_QUIT), 0, 0, quit_action}
+    {STR_I("update fehlstart"), STR_I(""), STR_I(""),
+        STR_I(GTK_STOCK_REFRESH), 0, 0 , update_action},
+    {STR_I("quit fehlstart"), STR_I(""), STR_I(""),
+        STR_I(GTK_STOCK_QUIT), 0, 0, quit_action},
+    {STR_I("fehlstart settings"), STR_I("config preferences"), STR_I(""),
+        STR_I(GTK_STOCK_PREFERENCES), 0, 0, settings_action}
 };
 
 //------------------------------------------
@@ -132,6 +139,7 @@ static GtkWidget* input_label = NULL;
 
 static char* config_file = 0;
 static char* action_file = 0;
+static char* user_file = 0;
 
 //------------------------------------------
 // helper functions
@@ -649,43 +657,32 @@ static void init_config_files(void)
 }
 
 //------------------------------------------
-// actions
+// misc
 
-static void quit_action(String command, Action* action)
-{
-    gtk_main_quit();
-}
-
-static void update_action(String command, Action* action)
+// does what it says, lists_mutex must be locked before calling
+static void reload_settings_and_actions(void)
 {
     save_actions();
+    read_config();
     update_launch_list();
     update_action_list();
     load_actions();
 }
 
-static void launch_action(String command, Action* action)
+// opens file in an editor and returns immediately
+static void run_editor(const char* file)
 {
     pid_t pid = fork();
     if (pid != 0)
         return;
 
-    setsid(); // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
-    Launch* launch = action->data;
-    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
-    if (info != 0)
-    {
-        // todo: I'd like to pass arguments here, g_app_info_launch supports
-        // uris and files but that's not really what I'm looking for
-        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
-        g_object_unref(G_OBJECT(info));
-    }
-    exit(EXIT_SUCCESS);
+    execlp("xdg-open", "", file, (char*)0);
+    execlp("x-terminal-emulator", "", "-e", "editor", file, (char*)0);
+    execlp("xterm", "", "-e", "vi", file, (char*)0); // getting desperate
+    printf("failed to open editor for %s\n", file)
+    exit(EXIT_FAILURE);
 }
-
-//------------------------------------------
-// misc
 
 static void register_hotkey(void)
 {
@@ -698,11 +695,11 @@ static void register_hotkey(void)
 }
 
 // gets run periodically
-static bool update_lists_cb(void *data)
+static gboolean update_lists_cb(void *data)
 {
     if (g_static_mutex_trylock(&lists_mutex))
     {
-        update_action(STR_S(""), 0);
+        reload_settings_and_actions();
         g_static_mutex_unlock(&lists_mutex);
     }
     return true;
@@ -711,7 +708,7 @@ static bool update_lists_cb(void *data)
 static void run_updates(void)
 {
     if (prefs.update_timeout && !prefs.one_time)
-        g_timeout_add_seconds(60 * prefs.update_timeout, (GSourceFunc) update_lists_cb, NULL);
+        g_timeout_add_seconds(60 * prefs.update_timeout, update_lists_cb, NULL);
 }
 
 static void create_widgets(void)
@@ -748,7 +745,7 @@ static void create_widgets(void)
 static const char* get_desktop_env(void)
 {
     // replacing strcasestr, but it's a gnu extension, b must be a static cstring
-    #define _CONTAINS(a, b) str_contains(str_wrap(a), STR_S(b))
+    #define _CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
     char* kde1 = getenv("KDE_FULL_SESSION");
@@ -795,13 +792,62 @@ static void parse_commandline(int argc, char** argv)
     }
 }
 
+//------------------------------------------
+// actions
 
+static void quit_action(String command, Action* action)
+{
+    gtk_main_quit();
+}
+
+static void update_action(String command, Action* action)
+{
+    // lists_mutex is locked when actions are called
+    reload_settings_and_actions();
+}
+
+static void launch_action(String command, Action* action)
+{
+    pid_t pid = fork();
+    if (pid != 0)
+        return;
+
+    setsid(); // "detatch" from parent process
+    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
+    Launch* launch = action->data;
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
+    if (info != 0)
+    {
+        // todo: I'd like to pass arguments here, g_app_info_launch supports
+        // uris and files but that's not really what I'm looking for
+        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
+        g_object_unref(G_OBJECT(info));
+    }
+    exit(EXIT_SUCCESS);
+}
+
+static gpointer settings_action_thread(gpointer data)
+{
+    // the plan was that run_editor only returns after the editor exits.
+    // that way I could reload the settings after changes have been made.
+    // but xdg-open and friends return imediately so that plan is spoiled :(
+    run_editor(config_file);
+    return NULL;
+}
+
+static void settings_action(String command, Action* action)
+{
+    g_thread_create(settings_action_thread, 0, false, NULL);
+}
+
+//------------------------------------------
 // main
 
 int main (int argc, char** argv)
 {
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
+    g_thread_init(NULL);
 
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
