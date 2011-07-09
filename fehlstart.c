@@ -10,8 +10,7 @@
 
 #include <dirent.h>
 #include <signal.h>
-
-#include <sys/time.h>
+#include <unistd.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
@@ -44,42 +43,50 @@
 
 typedef struct
 {
-    String file;
-    String name;
-    String executable;
-    String icon;
+    String  file;
+    String  name;
+    String  executable;
+    String  icon_name;
+    GIcon*  icon;
 } Launch;
 
-#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
+#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), NULL}
 
 typedef struct Action_
 {
-    String name;
-    String hidden_key;
-    String short_key;
-    String icon;
-    int score;
-    void*  data;
-    void (*action) (String, struct Action_*);
+    String  name;
+    String  hidden_key;
+    String  short_key;
+    String  icon_name;
+    int     score;
+    GIcon*  icon;
+    void*   data;
+    void    (*action) (String, struct Action_*);
 } Action;
 
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
 
+static void launch_action(String, Action*);
+static void settings_action(String, Action*);
+static void commands_action(String, Action*);
 static void update_action(String, Action*);
 static void quit_action(String, Action*);
-static void launch_action(String, Action*);
 
 //------------------------------------------
 // build-in actions
 
-#define NUM_ACTIONS 2
+#define _ACTION(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, NULL, action}
+#define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
-    {STR_I("update fehlstart"), STR_I(""), STR_I(""), STR_I(GTK_STOCK_REFRESH), 0, 0 , update_action},
-    {STR_I("quit fehlstart"), STR_I(""), STR_I(""), STR_I(GTK_STOCK_QUIT), 0, 0, quit_action}
+    _ACTION("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
+    _ACTION("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action),
+    _ACTION("edit settings", "config preferences", GTK_STOCK_PREFERENCES, settings_action),
+    _ACTION("edit commands", "", GTK_STOCK_EXECUTE, commands_action)
 };
+#undef _ACTION
 
 //------------------------------------------
 // global variables
@@ -88,18 +95,20 @@ static Action actions[NUM_ACTIONS] = {
 static struct
 {
     gchar *hotkey;
-    guint64 update_timeout;
+    gint update_timeout;
     bool strict_matching;
     bool match_executable;
+    bool cache_icon;
     bool show_icon;
     bool one_time;
 } prefs = {
-    DEFAULT_HOTKEY,
-    15,
-    false,
-    true,
-    true,
-    false
+    DEFAULT_HOTKEY,     // hotkey
+    15,                 // update_timeout
+    false,              // strict_matching
+    true,               // match_executable
+    true,               // cache_icon
+    true,               // show_icon
+    false               // one_time
 };
 
 // launcher stuff
@@ -121,9 +130,6 @@ static uint32_t input_string_size = 0;
 
 static GStaticMutex lists_mutex = G_STATIC_MUTEX_INIT;
 
-// workaround for the focus_out_event bug
-static struct timeval last_hide = {0, 0};
-
 // gtk widgets
 static GtkWidget* window = NULL;
 static GtkWidget* image = NULL;
@@ -132,9 +138,19 @@ static GtkWidget* input_label = NULL;
 
 static char* config_file = 0;
 static char* action_file = 0;
+static char* commands_file = 0;
+static char* user_app_dir = 0;
 
 //------------------------------------------
 // helper functions
+
+static bool is_readable_file(const char* file)
+{
+    FILE* f = fopen(file, "r");
+    if (f)
+        fclose(f);
+    return f != 0;
+}
 
 static const char* get_home_dir(void)
 {
@@ -166,51 +182,28 @@ static void add_launcher(Launch launch)
     launch_list_size++;
 }
 
-static bool load_launcher(String file_name, Launch* launcher)
+static bool load_launcher(String file, Launch* launcher)
 {
-    GKeyFile* file = g_key_file_new();
-    g_key_file_load_from_file(file, file_name.str, G_KEY_FILE_NONE, 0);
-
-    GDesktopAppInfo* info = 0;
-    info = g_desktop_app_info_new_from_keyfile(file);
-
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
     bool used = (info != 0)
         && !g_desktop_app_info_get_is_hidden(info)
         && g_app_info_should_show(G_APP_INFO(info));
 
     if (used)
     {
-        const char* str = 0;
-        launcher->file = file_name;
-        // get name
-        str = g_app_info_get_name(G_APP_INFO(info));
-        launcher->name = str_new(str);
-        // get executable
+        GAppInfo* app = G_APP_INFO(info);
+        launcher->file = file;
+        launcher->name = str_new(g_app_info_get_name(app));
         if (prefs.match_executable)
-        {
-            str = g_app_info_get_executable(G_APP_INFO(info));
-            launcher->executable = str_new(str);
-        }
-        // get icon
-        str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        String icon = STR_S(APPLICATION_ICON);
-        if (str)
-        {
-            icon = str_wrap(str);
-            // if icon is not a full path but ends with file extension...
-            // the skype package does this, and icon lookup works only without the .png
-            if (!g_path_is_absolute(icon.str)
-                && (str_ends_with_i(icon, STR_S(".png"))
-                || str_ends_with_i(icon, STR_S(".svg"))
-                || str_ends_with_i(icon, STR_S(".xpm"))))
-                icon.len -= 4;
-        }
-        launcher->icon = str_duplicate(icon);
-        g_free((gpointer)str);
+            launcher->executable = str_new(g_app_info_get_executable(app));
+        GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
+        if (prefs.show_icon)
+            launcher->icon_name = str_own(g_icon_to_string(icon));
+        if (prefs.show_icon && prefs.cache_icon)
+            launcher->icon = G_ICON(g_object_ref(icon));
     }
 
-    g_object_unref(G_OBJECT(info));
-    g_key_file_free(file);
+    g_object_unref(info);
     return used;
 }
 
@@ -219,10 +212,18 @@ static void free_launcher(Launch* launcher)
     str_free(launcher->file);
     str_free(launcher->name);
     str_free(launcher->executable);
-    str_free(launcher->icon);
+    str_free(launcher->icon_name);
+    g_object_unref(launcher->icon);
 }
 
-static void populate_launch_list(String dir_name)
+static void clear_launch_list(void)
+{
+    for (uint32_t i = 0; i < launch_list_size; i++)
+        free_launcher(launch_list + i);
+    launch_list_size = 0;
+}
+
+static void add_launchers_from_dir(String dir_name)
 {
     DIR* dir = opendir(dir_name.str);
     if (dir == 0)
@@ -235,7 +236,7 @@ static void populate_launch_list(String dir_name)
         String file_name = str_wrap(ent->d_name);
         if (str_ends_with_i(file_name, STR_S(".desktop")))
         {
-            String full_path = assemble_path(dir_name, file_name);
+            String full_path = str_assemble_path(dir_name, file_name);
             Launch launcher = LAUNCH_INITIALIZER;
             if (load_launcher(full_path, &launcher))
                 add_launcher(launcher);
@@ -246,26 +247,33 @@ static void populate_launch_list(String dir_name)
     closedir(dir);
 }
 
-static void clear_launch_list(void)
+static void add_launchers_from_commands(void)
 {
-    for (uint32_t i = 0; i < launch_list_size; i++)
-        free_launcher(launch_list + i);
-    launch_list_size = 0;
+    GKeyFile* kf = g_key_file_new();
+    g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    gchar** groups = g_key_file_get_groups(kf, NULL);
+    for (size_t i = 0; groups[i]; i++)
+    {
+        gchar* icon = g_key_file_get_string(kf, groups[i], "Icon", NULL);
+        Launch launch = {
+            STR_I("!command"), // mark as command
+            str_new(groups[i]),
+            str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
+            str_own(icon),
+            g_themed_icon_new(icon)
+        };
+        add_launcher(launch);
+    }
+    g_strfreev(groups);
+    g_key_file_free(kf);
 }
 
 static void update_launch_list(void)
 {
     clear_launch_list();
-    populate_launch_list(STR_S(APPLICATIONS_DIR));
-    const char* home = get_home_dir();
-    if (home != 0)
-    {
-        String home_dir = str_wrap(home);
-        String user_dir = STR_S(USER_APPLICATIONS_DIR);
-        String full_path = assemble_path(home_dir, user_dir);
-        populate_launch_list(full_path);
-        str_free(full_path);
-    }
+    add_launchers_from_dir(STR_S(APPLICATIONS_DIR));
+    add_launchers_from_dir(str_wrap(user_app_dir));
+    add_launchers_from_commands();
 }
 
 //------------------------------------------
@@ -289,11 +297,6 @@ static void clear_action_list(void)
     action_list_size = 0;
 }
 
-inline static int cmp_action_name(const void* a, const void* b)
-{
-    return str_compare_i(((Action*)a)->name, ((Action*)b)->name);
-}
-
 static void update_action_list(void)
 {
     clear_action_list();
@@ -306,15 +309,19 @@ static void update_action_list(void)
             l->name,        // name
             l->executable,  // hidden_key
             STR_S(""),      // short_key
-            l->icon,        // icon
+            l->icon_name,   // icon_name
             0,              // score
+            l->icon,        // icon
             l,              // data
             launch_action}; // action
         add_action(&action);
     }
     for (size_t i = 0; i < NUM_ACTIONS; i++)
+    {
+        if (actions[i].icon == NULL && actions[i].icon_name.len > 0 && prefs.show_icon)
+            actions[i].icon = g_themed_icon_new(actions[i].icon_name.str);
         add_action(actions + i);
-    qsort(action_list, action_list_size, sizeof(Action), cmp_action_name);
+    }
 }
 
 // calculates a score that determines in which order the results are displayed
@@ -322,7 +329,7 @@ static void update_action_score(Action* action, String filter)
 {
     int score = -1;
     if (str_starts_with(action->short_key, filter))
-        score = 10000 + (INPUT_STRING_SIZE - filter.len);
+        score = 10000 + (INPUT_STRING_SIZE - action->short_key.len);
 
     if (score < 0)
     {
@@ -384,67 +391,71 @@ static void run_selected(void)
             action->action(str, action);
         }
     }
-
     g_static_mutex_unlock(&lists_mutex);
 }
 
 //------------------------------------------
 // gui functions
 
-static void image_set_from_name(GtkImage* img, const char* name, GtkIconSize size)
+static void image_set_icon(GtkImage* img, const char* name, GIcon* icon)
 {
     if (!prefs.show_icon)
         return;
+    if (icon)
+    {
+        gtk_image_set_from_gicon(img, icon, ICON_SIZE);
+        return;
+    }
 
-    GIcon* icon = 0;
     if (g_path_is_absolute(name))
     {
-          GFile* file;
-          file = g_file_new_for_path(name);
-          icon = g_file_icon_new(file);
-          g_object_unref(file);
+        GFile* file = g_file_new_for_path(name);
+        icon = g_file_icon_new(file);
+        g_object_unref(file);
     }
     else
-        icon = g_themed_icon_new_with_default_fallbacks(name);
+        icon = g_themed_icon_new(name);
 
-    gtk_image_set_from_gicon(img, icon, size);
+    gtk_image_set_from_gicon(img, icon, ICON_SIZE);
     g_object_unref(icon);
 }
 
 static void show_selected(void)
 {
     const char* action_text = NO_MATCH_MESSAGE;
-    String icon_name = STR_S(NO_MATCH_ICON);
+    const char* icon_name = NO_MATCH_ICON;
+    GIcon* icon = NULL;
 
     g_static_mutex_lock(&lists_mutex);
     if (input_string_size == 0)
     {
         action_text = WELCOME_MESSAGE;
-        icon_name = STR_S(DEFAULT_ICON);
-    }                             // check in case async list update fails
+        icon_name = DEFAULT_ICON;
+    }
     else if (filter_list_size > 0 && filter_list_size <= action_list_size)
     {
         action_text = filter_list[filter_list_choice]->name.str;
-        icon_name = filter_list[filter_list_choice]->icon;
+        icon_name = filter_list[filter_list_choice]->icon_name.str;
+        icon = filter_list[filter_list_choice]->icon;
     }
     g_static_mutex_unlock(&lists_mutex);
 
     gtk_label_set_text(GTK_LABEL(input_label), input_string);
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
+    image_set_icon(GTK_IMAGE(image), icon_name, icon);
+
     gtk_widget_queue_draw(input_label);
     gtk_widget_queue_draw(action_label);
-
-    image_set_from_name(GTK_IMAGE(image), icon_name.str, ICON_SIZE);
     gtk_widget_queue_draw(image);
 }
 
 static void handle_text_input(GdkEventKey* event)
 {
-    if (event->keyval == GDK_KEY_BackSpace && input_string_size > 0)
+    if (event->keyval == GDK_BackSpace && input_string_size > 0)
         input_string_size--;
     else if (event->length == 1
         && (input_string_size + 1) < INPUT_STRING_SIZE
-        && (input_string_size > 0 || event->keyval != GDK_KEY_space))
+        && (input_string_size > 0 || event->keyval != GDK_space))
         input_string[input_string_size++] = event->keyval;
 
     input_string[input_string_size] = 0;
@@ -461,45 +472,24 @@ static void hide_window(void)
 
     if (prefs.one_time) // configured for one-time use
         gtk_main_quit();
-    else
-    {
-        gtk_widget_hide(window);
-        input_string[0] = 0;
-        input_string_size = 0;
-        filter_list_size = 0;
-        filter_list_choice = 0;
-        gettimeofday(&last_hide, 0);
-    }
-}
 
-// not part of posix, so I stole it from
-// http://www.rajivchakravorty.com/source-code/.tmp/snort-html/timersub_8h-source.html
-#define TIMERSUB(a, b, result)                              \
-    do {                                                    \
-        (result)->tv_sec = (a)->tv_sec - (b)->tv_sec;       \
-        (result)->tv_usec = (a)->tv_usec - (b)->tv_usec;    \
-        if ((result)->tv_usec < 0) {                        \
-            --(result)->tv_sec;                             \
-            (result)->tv_usec += 1000000;                   \
-        }                                                   \
-    } while (0)
+    gtk_widget_hide(window);
+    input_string[0] = 0;
+    input_string_size = 0;
+    filter_list_size = 0;
+    filter_list_choice = 0;
+}
 
 static void show_window(void)
 {
-    // cope with x stealing focus
-    struct timeval now, elapsed;
-    gettimeofday(&now, 0);
-    TIMERSUB(&now, &last_hide, &elapsed);
-    bool x11_sucks = (elapsed.tv_sec == 0 && elapsed.tv_usec < SHOW_IGNORE_TIME);
+    if (gtk_widget_get_visible(window))
+        return;
 
-    if (!x11_sucks && !gtk_widget_get_visible(window))
-    {
-        show_selected();
-        gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
-        gtk_window_present(GTK_WINDOW(window));
-        gtk_window_set_keep_above(GTK_WINDOW(window), true);
-        gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
-    }
+    show_selected();
+    gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
+    gtk_window_present(GTK_WINDOW(window));
+    gtk_window_set_keep_above(GTK_WINDOW(window), true);
+    gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
 }
 
 static void toggle_window(const char *keystring, void *data)
@@ -520,30 +510,24 @@ static gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
     return true;
 }
 
-static gboolean focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer data)
-{
-    hide_window();
-    return true;
-}
-
 static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 {
     switch (event->keyval)
     {
-        case GDK_KEY_Escape:
+        case GDK_Escape:
             hide_window();
         break;
-        case GDK_KEY_Return:
+        case GDK_Return:
             run_selected();
             hide_window();
         break;
-        case GDK_KEY_Up:
+        case GDK_Up:
             filter_list_choice += (filter_list_size - 1);
             filter_list_choice %= filter_list_size;
             show_selected();
         break;
-        case GDK_KEY_Tab:
-        case GDK_KEY_Down:
+        case GDK_Tab:
+        case GDK_Down:
             filter_list_choice++;
             filter_list_choice %= filter_list_size;
             show_selected();
@@ -578,11 +562,13 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
+    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     WRITE_PREF(string, "Bindings", "launch", hotkey);
     WRITE_PREF(boolean, "Matching", "strict", strict_matching);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
-    WRITE_PREF(uint64, "Update", "interval", update_timeout);
+    WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
+    WRITE_PREF(boolean, "Icons", "cache", cache_icon);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
@@ -600,8 +586,9 @@ static void read_config(void)
         READ_PREF(string, "Bindings", "launch", hotkey);
         READ_PREF(boolean, "Matching", "strict", strict_matching);
         READ_PREF(boolean, "Matching", "executable", match_executable);
-        READ_PREF(uint64, "Update", "interval", update_timeout);
+        READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
+        READ_PREF(boolean, "Icons", "cache", cache_icon);
     }
     g_key_file_free(kf);
 }
@@ -642,49 +629,45 @@ static void init_config_files(void)
     g_mkdir_with_parents(dir, 0700);
     config_file = g_build_filename(dir, "fehlstart.rc", NULL);
     action_file = g_build_filename(dir, "actions.rc", NULL);
+    commands_file = g_build_filename(dir, "commands.rc", NULL);
     g_free(dir);
     atexit(save_config);
     atexit(save_actions);
 }
 
 //------------------------------------------
-// actions
+// misc
 
-static void quit_action(String command, Action* action)
-{
-    gtk_main_quit();
-}
-
-static void update_action(String command, Action* action)
+// does what it says, lists_mutex must be locked before calling
+static void reload_settings_and_actions(void)
 {
     save_actions();
+    read_config();
     update_launch_list();
     update_action_list();
     load_actions();
 }
 
-static void launch_action(String command, Action* action)
+// opens file in an editor and returns immediately
+// the plan was that run_editor only returns after the editor exits.
+// that way I could reload the settings after changes have been made.
+// but xdg-open and friends return immediately so that plan was spoiled :(
+static void run_editor(const char* file)
 {
+    if (!is_readable_file(file))
+        return;
+
     pid_t pid = fork();
     if (pid != 0)
         return;
 
-    setsid(); // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
-    Launch* launch = action->data;
-    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
-    if (info != 0)
-    {
-        // todo: I'd like to pass arguments here, g_app_info_launch supports
-        // uris and files but that's not really what I'm looking for
-        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
-        g_object_unref(G_OBJECT(info));
-    }
-    exit(EXIT_SUCCESS);
+    execlp("xdg-open", "", file, (char*)0);
+    execlp("x-terminal-emulator", "", "-e", "editor", file, (char*)0);
+    execlp("xterm", "", "-e", "vi", file, (char*)0); // getting desperate
+    printf("failed to open editor for %s\n", file);
+    exit(EXIT_FAILURE);
 }
-
-//------------------------------------------
-// misc
 
 static void register_hotkey(void)
 {
@@ -697,11 +680,11 @@ static void register_hotkey(void)
 }
 
 // gets run periodically
-static bool update_lists_cb(void *data)
+static gboolean update_lists_cb(void *data)
 {
     if (g_static_mutex_trylock(&lists_mutex))
     {
-        update_action(STR_S(""), 0);
+        reload_settings_and_actions();
         g_static_mutex_unlock(&lists_mutex);
     }
     return true;
@@ -710,7 +693,7 @@ static bool update_lists_cb(void *data)
 static void run_updates(void)
 {
     if (prefs.update_timeout && !prefs.one_time)
-        g_timeout_add_seconds(60 * prefs.update_timeout, (GSourceFunc) update_lists_cb, NULL);
+        g_timeout_add_seconds(60 * prefs.update_timeout, update_lists_cb, NULL);
 }
 
 static void create_widgets(void)
@@ -724,14 +707,13 @@ static void create_widgets(void)
     g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), 0);
     g_signal_connect(window, "destroy", G_CALLBACK(destroy), 0);
     g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), 0);
-    g_signal_connect(window, "focus-out-event", G_CALLBACK(focus_out_event), 0);
 
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
     gtk_widget_show(vbox);
 
     image = gtk_image_new();
-    image_set_from_name(GTK_IMAGE(image), DEFAULT_ICON, ICON_SIZE);
+    gtk_image_set_from_icon_name(GTK_IMAGE(image), DEFAULT_ICON, ICON_SIZE);
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
     gtk_widget_show(image);
 
@@ -785,7 +767,7 @@ static void parse_commandline(int argc, char** argv)
             prefs.one_time = true;
         else if (!strcmp(argv[i], "--help"))
         {
-            printf("fehlstart 0.2.4 (c) 2011 maep\noptions:\n"\
+            printf("fehlstart 0.2.5 (c) 2011 maep\noptions:\n"\
                 "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         }
@@ -794,11 +776,83 @@ static void parse_commandline(int argc, char** argv)
     }
 }
 
+static void run_launcher(String command, Launch* launch)
+{
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
+    if (info != 0)
+        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
+    g_object_unref(info);
+}
 
+static void run_command(String command, Launch* launch)
+{
+    // extract args from command
+    uint32_t sp = str_find_first(command, STR_S(" "));
+    String cmd = (sp == STR_END) ?
+        str_duplicate(launch->executable) :
+        str_concat(launch->executable, str_substring(command, sp, STR_END));
+    printf("%s\n", cmd.str);
+    if (system(cmd.str)) {}; // to shut up gcc
+    str_free(cmd);
+}
+
+//------------------------------------------
+// actions
+
+static void quit_action(String command, Action* action)
+{
+    gtk_main_quit();
+}
+
+static void update_action(String command, Action* action)
+{
+    // lists_mutex is locked when actions are called
+    reload_settings_and_actions();
+}
+
+static void launch_action(String command, Action* action)
+{
+    pid_t pid = fork();
+    if (pid != 0)
+        return;
+
+    setsid(); // "detatch" from parent process
+    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
+    Launch* launch = action->data;
+    if (str_equals(launch->file, STR_S("!command")))
+        run_command(command, launch);
+    else
+        run_launcher(command, launch);
+    exit(EXIT_SUCCESS);
+}
+
+static void settings_action(String command, Action* action)
+{
+    save_config();
+    run_editor(config_file);
+}
+
+static void commands_action(String command, Action* action)
+{
+    if (!is_readable_file(commands_file))
+    {
+        FILE* f = fopen(commands_file, "w");
+        if (!f)
+            return;
+        fputs("#example: 'run top' would start top in xterm\n"\
+            "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
+        fclose(f);
+    }
+    run_editor(commands_file);
+}
+
+//------------------------------------------
 // main
 
 int main (int argc, char** argv)
 {
+    g_thread_init(NULL);
+
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
     g_thread_init(NULL);
@@ -806,6 +860,7 @@ int main (int argc, char** argv)
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
     g_desktop_app_info_set_desktop_env(get_desktop_env());
+    user_app_dir = g_build_filename(get_home_dir(), USER_APPLICATIONS_DIR, NULL);
 
     init_config_files();
     read_config();
@@ -821,6 +876,5 @@ int main (int argc, char** argv)
     run_updates();
 
     gtk_main();
-
     return EXIT_SUCCESS;
 }
