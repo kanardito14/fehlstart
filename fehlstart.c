@@ -46,23 +46,25 @@ typedef struct
     String  file;
     String  name;
     String  executable;
-    String  icon;
+    String  icon_name;
+    GIcon*  icon;
 } Launch;
 
-#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
+#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), NULL}
 
 typedef struct Action_
 {
     String  name;
     String  hidden_key;
     String  short_key;
-    String  icon;
+    String  icon_name;
     int     score;
+    GIcon*  icon;
     void*   data;
     void    (*action) (String, struct Action_*);
 } Action;
 
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
@@ -76,7 +78,7 @@ static void quit_action(String, Action*);
 //------------------------------------------
 // build-in actions
 
-#define _ACTION(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, 0 , action}
+#define _ACTION(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, NULL, action}
 #define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
     _ACTION("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
@@ -96,15 +98,17 @@ static struct
     gint update_timeout;
     bool strict_matching;
     bool match_executable;
+    bool cache_icon;
     bool show_icon;
     bool one_time;
 } prefs = {
-    DEFAULT_HOTKEY,
-    15,
-    false,
-    true,
-    true,
-    false
+    DEFAULT_HOTKEY,     // hotkey
+    15,                 // update_timeout
+    false,              // strict_matching
+    true,               // match_executable
+    true,               // cache_icon
+    true,               // show_icon
+    false               // one_time
 };
 
 // launcher stuff
@@ -178,46 +182,28 @@ static void add_launcher(Launch launch)
     launch_list_size++;
 }
 
-static bool load_launcher(String file_name, Launch* launcher)
+static bool load_launcher(String file, Launch* launcher)
 {
-    GKeyFile* file = g_key_file_new();
-    g_key_file_load_from_file(file, file_name.str, G_KEY_FILE_NONE, 0);
-
-    GDesktopAppInfo* info = 0;
-    info = g_desktop_app_info_new_from_keyfile(file);
-
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
     bool used = (info != 0)
         && !g_desktop_app_info_get_is_hidden(info)
         && g_app_info_should_show(G_APP_INFO(info));
 
     if (used)
     {
-        const char* str = 0;
-        launcher->file = file_name;
-        // get name
-        str = g_app_info_get_name(G_APP_INFO(info));
-        launcher->name = str_new(str);
-        // get executable
+        GAppInfo* app = G_APP_INFO(info);
+        launcher->file = file;
+        launcher->name = str_new(g_app_info_get_name(app));
         if (prefs.match_executable)
-        {
-            str = g_app_info_get_executable(G_APP_INFO(info));
-            launcher->executable = str_new(str);
-        }
-        // get icon
-        str = g_key_file_get_value(file, G_KEY_FILE_DESKTOP_GROUP, G_KEY_FILE_DESKTOP_KEY_ICON, 0);
-        String icon = (str) ? str_own(str) : STR_S(APPLICATION_ICON);
-        // if icon is not a full path but ends with file extension...
-        // the skype package does this, and icon lookup works only without the .png
-        if (!g_path_is_absolute(icon.str)
-            && (str_ends_with_i(icon, STR_S(".png"))
-            || str_ends_with_i(icon, STR_S(".svg"))
-            || str_ends_with_i(icon, STR_S(".xpm"))))
-            icon.len -= 4;
-        launcher->icon = icon;
+            launcher->executable = str_new(g_app_info_get_executable(app));
+        GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
+        if (prefs.show_icon)
+            launcher->icon_name = str_own(g_icon_to_string(icon));
+        if (prefs.show_icon && prefs.cache_icon)
+            launcher->icon = G_ICON(g_object_ref(icon));
     }
 
-    g_object_unref(G_OBJECT(info));
-    g_key_file_free(file);
+    g_object_unref(info);
     return used;
 }
 
@@ -226,7 +212,8 @@ static void free_launcher(Launch* launcher)
     str_free(launcher->file);
     str_free(launcher->name);
     str_free(launcher->executable);
-    str_free(launcher->icon);
+    str_free(launcher->icon_name);
+    g_object_unref(launcher->icon);
 }
 
 static void clear_launch_list(void)
@@ -267,11 +254,13 @@ static void add_launchers_from_commands(void)
     gchar** groups = g_key_file_get_groups(kf, NULL);
     for (size_t i = 0; groups[i]; i++)
     {
+        gchar* icon = g_key_file_get_string(kf, groups[i], "Icon", NULL);
         Launch launch = {
             STR_I("!command"), // mark as command
             str_new(groups[i]),
             str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
-            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL))
+            str_own(icon),
+            g_themed_icon_new(icon)
         };
         add_launcher(launch);
     }
@@ -308,11 +297,6 @@ static void clear_action_list(void)
     action_list_size = 0;
 }
 
-inline static int cmp_action_name(const void* a, const void* b)
-{
-    return str_compare_i(((Action*)a)->name, ((Action*)b)->name);
-}
-
 static void update_action_list(void)
 {
     clear_action_list();
@@ -325,15 +309,19 @@ static void update_action_list(void)
             l->name,        // name
             l->executable,  // hidden_key
             STR_S(""),      // short_key
-            l->icon,        // icon
+            l->icon_name,   // icon_name
             0,              // score
+            l->icon,        // icon
             l,              // data
             launch_action}; // action
         add_action(&action);
     }
     for (size_t i = 0; i < NUM_ACTIONS; i++)
+    {
+        if (actions[i].icon == NULL && actions[i].icon_name.len > 0 && prefs.show_icon)
+            actions[i].icon = g_themed_icon_new(actions[i].icon_name.str);
         add_action(actions + i);
-    qsort(action_list, action_list_size, sizeof(Action), cmp_action_name);
+    }
 }
 
 // calculates a score that determines in which order the results are displayed
@@ -409,53 +397,56 @@ static void run_selected(void)
 //------------------------------------------
 // gui functions
 
-static gpointer set_icon_thread(gpointer data)
+static void image_set_icon(GtkImage* img, const char* name, GIcon* icon)
 {
-    const char* name = (const char*)data;
-    if (prefs.show_icon)
+    if (!prefs.show_icon)
+        return;
+    if (icon)
     {
-        gdk_threads_enter();
-        GIcon* icon = 0;
-        if (g_path_is_absolute(name))
-        {
-              GFile* file = g_file_new_for_path(name);
-              icon = g_file_icon_new(file);
-              g_object_unref(file);
-        }
-        else
-            icon = g_themed_icon_new_with_default_fallbacks(name);
-
-        gtk_image_set_from_gicon(GTK_IMAGE(image), icon, ICON_SIZE);
-        gtk_widget_queue_draw(image);
-        g_object_unref(icon);
-        gdk_threads_leave();
+        gtk_image_set_from_gicon(img, icon, ICON_SIZE);
+        return;
     }
-    return NULL;
+
+    if (g_path_is_absolute(name))
+    {
+        GFile* file = g_file_new_for_path(name);
+        icon = g_file_icon_new(file);
+        g_object_unref(file);
+    }
+    else
+        icon = g_themed_icon_new(name);
+
+    gtk_image_set_from_gicon(img, icon, ICON_SIZE);
+    g_object_unref(icon);
 }
 
 static void show_selected(void)
 {
     const char* action_text = NO_MATCH_MESSAGE;
-    String icon_name = STR_S(NO_MATCH_ICON);
+    const char* icon_name = NO_MATCH_ICON;
+    GIcon* icon = NULL;
 
     g_static_mutex_lock(&lists_mutex);
     if (input_string_size == 0)
     {
         action_text = WELCOME_MESSAGE;
-        icon_name = STR_S(DEFAULT_ICON);
-    }                             // check in case async list update fails
+        icon_name = DEFAULT_ICON;
+    }
     else if (filter_list_size > 0 && filter_list_size <= action_list_size)
     {
         action_text = filter_list[filter_list_choice]->name.str;
-        icon_name = filter_list[filter_list_choice]->icon;
+        icon_name = filter_list[filter_list_choice]->icon_name.str;
+        icon = filter_list[filter_list_choice]->icon;
     }
     g_static_mutex_unlock(&lists_mutex);
 
     gtk_label_set_text(GTK_LABEL(input_label), input_string);
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
+    image_set_icon(GTK_IMAGE(image), icon_name, icon);
+
     gtk_widget_queue_draw(input_label);
     gtk_widget_queue_draw(action_label);
-    g_thread_create(set_icon_thread, icon_name.str, false, NULL);
+    gtk_widget_queue_draw(image);
 }
 
 static void handle_text_input(GdkEventKey* event)
@@ -577,6 +568,7 @@ static void save_config(void)
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
     WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
+    WRITE_PREF(boolean, "Icons", "cache", cache_icon);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
@@ -596,6 +588,7 @@ static void read_config(void)
         READ_PREF(boolean, "Matching", "executable", match_executable);
         READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
+        READ_PREF(boolean, "Icons", "cache", cache_icon);
     }
     g_key_file_free(kf);
 }
@@ -787,10 +780,8 @@ static void run_launcher(String command, Launch* launch)
 {
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
     if (info != 0)
-    {
         g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
-        g_object_unref(G_OBJECT(info));
-    }
+    g_object_unref(info);
 }
 
 static void run_command(String command, Launch* launch)
@@ -861,7 +852,6 @@ static void commands_action(String command, Action* action)
 int main (int argc, char** argv)
 {
     g_thread_init(NULL);
-    gdk_threads_init();
 
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
@@ -884,9 +874,6 @@ int main (int argc, char** argv)
     register_hotkey();
     run_updates();
 
-    gdk_threads_enter();
     gtk_main();
-    gdk_threads_leave();
-
     return EXIT_SUCCESS;
 }
