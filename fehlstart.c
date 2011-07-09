@@ -74,7 +74,6 @@ static void settings_action(String, Action*);
 static void commands_action(String, Action*);
 static void update_action(String, Action*);
 static void quit_action(String, Action*);
-
 //------------------------------------------
 // build-in actions
 
@@ -101,6 +100,8 @@ static struct
     bool cache_icon;
     bool show_icon;
     bool one_time;
+    gchar *border_color;
+    gint border_width;
 } prefs = {
     DEFAULT_HOTKEY,     // hotkey
     15,                 // update_timeout
@@ -108,7 +109,9 @@ static struct
     true,               // match_executable
     true,               // cache_icon
     true,               // show_icon
-    false               // one_time
+    false,              // one_time
+    "#000000",          // border_color
+    1                   // border_width
 };
 
 // launcher stuff
@@ -540,6 +543,27 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
     return true;
 }
 
+static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+    cairo_t *cr = gdk_cairo_create(widget->window);
+    double r, g, b;
+    GdkColor border_gdk_colors;
+    gdk_color_parse(prefs.border_color, &border_gdk_colors);
+    r = border_gdk_colors.red / (float) (1 << 16);
+    g = border_gdk_colors.green / (float) (1 << 16);
+    b = border_gdk_colors.blue / (float) (1 << 16);
+    cairo_set_source_rgb(cr, r, g, b);
+    cairo_rectangle(cr, 0, 0, gdk_window_get_width(window->window),
+                    gdk_window_get_height(window->window));
+    /* because we're drawing right at the edge of the window, we need to double
+     * the border width to get the expected result
+     */
+    cairo_set_line_width(cr, prefs.border_width * 2);
+    cairo_stroke(cr);
+    cairo_destroy(cr);
+    return false;
+}
+
 //------------------------------------------
 // config files
 
@@ -569,6 +593,8 @@ static void save_config(void)
     WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
     WRITE_PREF(boolean, "Icons", "cache", cache_icon);
+    WRITE_PREF(string, "Border", "color", border_color);
+    WRITE_PREF(integer, "Border", "width", border_width);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
@@ -589,6 +615,8 @@ static void read_config(void)
         READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
         READ_PREF(boolean, "Icons", "cache", cache_icon);
+        READ_PREF(string, "Border", "color", border_color);
+        READ_PREF(integer, "Border", "width", border_width);
     }
     g_key_file_free(kf);
 }
@@ -710,6 +738,7 @@ static void create_widgets(void)
 
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
+    g_signal_connect(vbox, "expose-event", G_CALLBACK(expose_event), 0);
     gtk_widget_show(vbox);
 
     image = gtk_image_new();
