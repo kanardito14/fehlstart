@@ -26,8 +26,6 @@
 #define NO_MATCH_MESSAGE    "no match"
 
 #define DEFAULT_HOTKEY      "<Super>space"
-#define WINDOW_WIDTH        200
-#define WINDOW_HEIGHT       100
 
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 #define DEFAULT_ICON        GTK_STOCK_FIND
@@ -102,6 +100,8 @@ static struct
     bool one_time;
     gchar *border_color;
     gint border_width;
+    gint window_width;
+    gint window_height;
 } prefs = {
     DEFAULT_HOTKEY,     // hotkey
     15,                 // update_timeout
@@ -111,7 +111,9 @@ static struct
     true,               // show_icon
     false,              // one_time
     "#000000",          // border_color
-    1                   // border_width
+    1,                  // border_width
+    200,                // window_width
+    100                 // window_height
 };
 
 // launcher stuff
@@ -595,6 +597,8 @@ static void save_config(void)
     WRITE_PREF(boolean, "Icons", "cache", cache_icon);
     WRITE_PREF(string, "Border", "color", border_color);
     WRITE_PREF(integer, "Border", "width", border_width);
+    WRITE_PREF(integer, "Window", "width", window_width);
+    WRITE_PREF(integer, "Window", "height", window_height);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
@@ -617,6 +621,8 @@ static void read_config(void)
         READ_PREF(boolean, "Icons", "cache", cache_icon);
         READ_PREF(string, "Border", "color", border_color);
         READ_PREF(integer, "Border", "width", border_width);
+        READ_PREF(integer, "Window", "width", window_width);
+        READ_PREF(integer, "Window", "height", window_height);
     }
     g_key_file_free(kf);
 }
@@ -727,7 +733,7 @@ static void run_updates(void)
 static void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_POPUP);
-    gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
+    gtk_widget_set_size_request(window, prefs.window_width, prefs.window_height);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
     gtk_window_set_accept_focus(GTK_WINDOW(window), true);
 
