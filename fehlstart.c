@@ -522,6 +522,7 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         case GDK_Escape:
             hide_window();
         break;
+        case GDK_KP_Enter:
         case GDK_Return:
             run_selected();
             hide_window();
