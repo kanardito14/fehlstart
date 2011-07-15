@@ -527,14 +527,18 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
             hide_window();
         break;
         case GDK_Up:
-            filter_list_choice += (filter_list_size - 1);
-            filter_list_choice %= filter_list_size;
+            if (filter_list_size) {
+                filter_list_choice += (filter_list_size - 1);
+                filter_list_choice %= filter_list_size;
+            }
             show_selected();
         break;
         case GDK_Tab:
         case GDK_Down:
-            filter_list_choice++;
-            filter_list_choice %= filter_list_size;
+            if (filter_list_size) {
+                filter_list_choice++;
+                filter_list_choice %= filter_list_size;
+            }
             show_selected();
         break;
         default:
