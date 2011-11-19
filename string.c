@@ -11,7 +11,7 @@
 
 #include "string.h"
 
-// No sense in including all of glib for this, make use of gcc
+// No sense in including all of glib for this
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)

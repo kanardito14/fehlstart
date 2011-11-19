@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <strings.h>
 #include <dirent.h>
 #include <signal.h>
 #include <unistd.h>
@@ -26,15 +27,14 @@
 #define NO_MATCH_MESSAGE    "no match"
 
 #define DEFAULT_HOTKEY      "<Super>space"
-#define WINDOW_WIDTH        200
-#define WINDOW_HEIGHT       100
 
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 #define DEFAULT_ICON        GTK_STOCK_FIND
 #define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
 #define APPLICATION_ICON    "applications-other"
 
-#define APPLICATIONS_DIR                "/usr/share/applications"
+#define APPLICATIONS_DIR_0              "/usr/share/applications"
+#define APPLICATIONS_DIR_1              "/usr/local/share/applications"
 #define USER_APPLICATIONS_DIR           ".local/share/applications"
 
 #define INITIAL_LAUNCH_LIST_CAPACITY    0xff
@@ -74,19 +74,18 @@ static void settings_action(String, Action*);
 static void commands_action(String, Action*);
 static void update_action(String, Action*);
 static void quit_action(String, Action*);
-
 //------------------------------------------
 // build-in actions
 
-#define _ACTION(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, NULL, action}
+#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, NULL, action}
 #define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
-    _ACTION("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
-    _ACTION("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action),
-    _ACTION("edit settings", "config preferences", GTK_STOCK_PREFERENCES, settings_action),
-    _ACTION("edit commands", "", GTK_STOCK_EXECUTE, commands_action)
+    MKA("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
+    MKA("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action),
+    MKA("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, settings_action),
+    MKA("fehlstart commands", "", GTK_STOCK_EXECUTE, commands_action)
 };
-#undef _ACTION
+#undef MKA
 
 //------------------------------------------
 // global variables
@@ -101,6 +100,10 @@ static struct
     bool cache_icon;
     bool show_icon;
     bool one_time;
+    gchar *border_color;
+    gint border_width;
+    gint window_width;
+    gint window_height;
 } prefs = {
     DEFAULT_HOTKEY,     // hotkey
     15,                 // update_timeout
@@ -108,7 +111,11 @@ static struct
     true,               // match_executable
     true,               // cache_icon
     true,               // show_icon
-    false               // one_time
+    false,              // one_time
+    "default",          // border_color
+    1,                  // border_width
+    200,                // window_width
+    100                 // window_height
 };
 
 // launcher stuff
@@ -173,8 +180,7 @@ static String get_first_input_word(void)
 
 static void add_launcher(Launch launch)
 {
-    if (launch_list_size + 1 > launch_list_capacity)
-    {
+    if (launch_list_size + 1 > launch_list_capacity) {
         launch_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
         launch_list = realloc(launch_list, launch_list_capacity * sizeof(Launch));
     }
@@ -185,12 +191,11 @@ static void add_launcher(Launch launch)
 static bool load_launcher(String file, Launch* launcher)
 {
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
-    bool used = (info != 0)
-        && !g_desktop_app_info_get_is_hidden(info)
-        && g_app_info_should_show(G_APP_INFO(info));
+    bool used = (info != 0) &&
+        !g_desktop_app_info_get_is_hidden(info) &&
+        g_app_info_should_show(G_APP_INFO(info));
 
-    if (used)
-    {
+    if (used) {
         GAppInfo* app = G_APP_INFO(info);
         launcher->file = file;
         launcher->name = str_new(g_app_info_get_name(app));
@@ -231,11 +236,9 @@ static void add_launchers_from_dir(String dir_name)
     printf("reading %s\n", dir_name.str);
 
     struct dirent* ent = 0;
-    while ((ent = readdir(dir)) != 0)
-    {
+    while ((ent = readdir(dir)) != 0) {
         String file_name = str_wrap(ent->d_name);
-        if (str_ends_with_i(file_name, STR_S(".desktop")))
-        {
+        if (str_ends_with_i(file_name, STR_S(".desktop"))) {
             String full_path = str_assemble_path(dir_name, file_name);
             Launch launcher = LAUNCH_INITIALIZER;
             if (load_launcher(full_path, &launcher))
@@ -252,14 +255,13 @@ static void add_launchers_from_commands(void)
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     gchar** groups = g_key_file_get_groups(kf, NULL);
-    for (size_t i = 0; groups[i]; i++)
-    {
-        gchar* icon = g_key_file_get_string(kf, groups[i], "Icon", NULL);
+    for (size_t i = 0; groups[i]; i++) {
+        gchar* icon = g_key_file_get_string(kf, groups[i], "Exec", NULL);
         Launch launch = {
             STR_I("!command"), // mark as command
             str_new(groups[i]),
-            str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
             str_own(icon),
+            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL)),
             g_themed_icon_new(icon)
         };
         add_launcher(launch);
@@ -271,8 +273,9 @@ static void add_launchers_from_commands(void)
 static void update_launch_list(void)
 {
     clear_launch_list();
-    add_launchers_from_dir(STR_S(APPLICATIONS_DIR));
     add_launchers_from_dir(str_wrap(user_app_dir));
+    add_launchers_from_dir(STR_S(APPLICATIONS_DIR_1));
+    add_launchers_from_dir(STR_S(APPLICATIONS_DIR_0));
     add_launchers_from_commands();
 }
 
@@ -281,8 +284,7 @@ static void update_launch_list(void)
 
 static void add_action(Action* action)
 {
-    if (action_list_size + 1 > action_list_capacity)
-    {
+    if (action_list_size + 1 > action_list_capacity) {
         action_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
         action_list = realloc(action_list, action_list_capacity * sizeof(Action));
     }
@@ -300,8 +302,7 @@ static void clear_action_list(void)
 static void update_action_list(void)
 {
     clear_action_list();
-    for (size_t i = 0; i < launch_list_size; i++)
-    {
+    for (size_t i = 0; i < launch_list_size; i++) {
         Launch* l = launch_list + i;
         String keyword = str_duplicate(l->name);
         str_to_lower(keyword);
@@ -313,11 +314,11 @@ static void update_action_list(void)
             0,              // score
             l->icon,        // icon
             l,              // data
-            launch_action}; // action
+            launch_action   // action
+    };
         add_action(&action);
     }
-    for (size_t i = 0; i < NUM_ACTIONS; i++)
-    {
+    for (size_t i = 0; i < NUM_ACTIONS; i++) {
         if (actions[i].icon == NULL && actions[i].icon_name.len > 0 && prefs.show_icon)
             actions[i].icon = g_themed_icon_new(actions[i].icon_name.str);
         add_action(actions + i);
@@ -331,15 +332,13 @@ static void update_action_score(Action* action, String filter)
     if (str_starts_with(action->short_key, filter))
         score = 10000 + (INPUT_STRING_SIZE - action->short_key.len);
 
-    if (score < 0)
-    {
+    if (score < 0) {
         uint32_t pos = str_find_first_i(action->name, filter);
         if (pos != STR_END)
             score = 100 + (filter.len - pos);
     }
 
-    if (score < 0)
-    {
+    if (score < 0) {
         uint32_t pos = str_find_first_i(action->hidden_key, filter);
         if (pos != STR_END)
             score = 1 + (filter.len - pos);
@@ -358,15 +357,13 @@ static void filter_action_list(String filter)
         return;
     g_static_mutex_lock(&lists_mutex);
 
-    if (filter_list_capacity < action_list_capacity)
-    {
+    if (filter_list_capacity < action_list_capacity) {
         filter_list_capacity = action_list_capacity;
         filter_list = realloc(filter_list, filter_list_capacity * sizeof(Action*));
     }
 
     filter_list_size = 0;
-    for (size_t i = 0; i < action_list_size; i++)
-    {
+    for (size_t i = 0; i < action_list_size; i++) {
         update_action_score(action_list + i, filter);
         if (action_list[i].score > 0)
             filter_list[filter_list_size++] = action_list + i;
@@ -376,15 +373,12 @@ static void filter_action_list(String filter)
     g_static_mutex_unlock(&lists_mutex);
 }
 
-static void run_selected(void)
-{
+static void run_selected(void) {
     g_static_mutex_lock(&lists_mutex);
                                 // check in case async list update fails
-    if (filter_list_size > 0 && filter_list_choice < action_list_size)
-    {
+    if (filter_list_size > 0 && filter_list_choice < action_list_size) {
         Action* action = filter_list[filter_list_choice];
-        if (action->action != 0)
-        {
+        if (action->action != 0) {
             str_free(action->short_key);
             action->short_key = str_duplicate(get_first_input_word());
             String str = str_wrap_n(input_string, input_string_size);
@@ -401,20 +395,18 @@ static void image_set_icon(GtkImage* img, const char* name, GIcon* icon)
 {
     if (!prefs.show_icon)
         return;
-    if (icon)
-    {
+    if (icon) {
         gtk_image_set_from_gicon(img, icon, ICON_SIZE);
         return;
     }
 
-    if (g_path_is_absolute(name))
-    {
+    if (g_path_is_absolute(name)) {
         GFile* file = g_file_new_for_path(name);
         icon = g_file_icon_new(file);
         g_object_unref(file);
-    }
-    else
+    } else {
         icon = g_themed_icon_new(name);
+    }
 
     gtk_image_set_from_gicon(img, icon, ICON_SIZE);
     g_object_unref(icon);
@@ -427,13 +419,10 @@ static void show_selected(void)
     GIcon* icon = NULL;
 
     g_static_mutex_lock(&lists_mutex);
-    if (input_string_size == 0)
-    {
+    if (input_string_size == 0) {
         action_text = WELCOME_MESSAGE;
         icon_name = DEFAULT_ICON;
-    }
-    else if (filter_list_size > 0 && filter_list_size <= action_list_size)
-    {
+    } else if (filter_list_size > 0 && filter_list_size <= action_list_size) {
         action_text = filter_list[filter_list_choice]->name.str;
         icon_name = filter_list[filter_list_choice]->icon_name.str;
         icon = filter_list[filter_list_choice]->icon;
@@ -453,9 +442,9 @@ static void handle_text_input(GdkEventKey* event)
 {
     if (event->keyval == GDK_BackSpace && input_string_size > 0)
         input_string_size--;
-    else if (event->length == 1
-        && (input_string_size + 1) < INPUT_STRING_SIZE
-        && (input_string_size > 0 || event->keyval != GDK_space))
+    else if (event->length == 1 &&
+        (input_string_size + 1) < INPUT_STRING_SIZE &&
+        (input_string_size > 0 || event->keyval != GDK_space))
         input_string[input_string_size++] = event->keyval;
 
     input_string[input_string_size] = 0;
@@ -512,32 +501,62 @@ static gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
 
 static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 {
-    switch (event->keyval)
-    {
-        case GDK_Escape:
-            hide_window();
+    switch (event->keyval) {
+    case GDK_Escape:
+        hide_window();
         break;
-        case GDK_Return:
-            run_selected();
-            hide_window();
+    case GDK_KP_Enter:
+    case GDK_Return:
+        run_selected();
+        hide_window();
         break;
-        case GDK_Up:
+    case GDK_Up:
+        if (filter_list_size) {
             filter_list_choice += (filter_list_size - 1);
             filter_list_choice %= filter_list_size;
-            show_selected();
+        }
+        show_selected();
         break;
-        case GDK_Tab:
-        case GDK_Down:
+    case GDK_Tab:
+    case GDK_Down:
+        if (filter_list_size) {
             filter_list_choice++;
             filter_list_choice %= filter_list_size;
-            show_selected();
+        }
+        show_selected();
         break;
-        default:
-            handle_text_input(event);
-            show_selected();
+    default:
+        handle_text_input(event);
+        show_selected();
         break;
     }
     return true;
+}
+
+static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+    double r, g, b;
+    GdkColor color;
+    cairo_t *cr = gdk_cairo_create(widget->window);
+    
+    if (!strcasecmp(prefs.border_color, "default"))
+        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
+    else
+        gdk_color_parse(prefs.border_color, &color);
+    r = (double)color.red / 0xffff;
+    g = (double)color.green / 0xffff;
+    b = (double)color.blue / 0xffff;
+    
+    cairo_set_source_rgb(cr, r, g, b);
+    cairo_rectangle(cr, 0, 0, gdk_window_get_width(window->window), gdk_window_get_height(window->window));
+    
+    /* because we're drawing right at the edge of the window, we need to double
+     * the border width to get the expected result */
+    cairo_set_line_width(cr, prefs.border_width * 2);
+    cairo_stroke(cr);
+    cairo_destroy(cr);
+    
+    return false;
 }
 
 //------------------------------------------
@@ -558,7 +577,6 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 // macro for writing to keyfile
 #define WRITE_PREF(type, group, key, var) \
     g_key_file_set_##type (kf, group, key, prefs.var)
-
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
@@ -569,15 +587,19 @@ static void save_config(void)
     WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
     WRITE_PREF(boolean, "Icons", "cache", cache_icon);
+    WRITE_PREF(string, "Border", "color", border_color);
+    WRITE_PREF(integer, "Border", "width", border_width);
+    WRITE_PREF(integer, "Window", "width", window_width);
+    WRITE_PREF(integer, "Window", "height", window_height);
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
+#undef WRITE_PREF
 
 // macro for reading from keyfile, without overwriting default values
 #define READ_PREF(type, group, key, var)            \
     if (g_key_file_has_key(kf, group, key, NULL))   \
         prefs.var = g_key_file_get_##type (kf, group, key, NULL)
-
 static void read_config(void)
 {
     GKeyFile *kf = g_key_file_new();
@@ -589,15 +611,19 @@ static void read_config(void)
         READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
         READ_PREF(boolean, "Icons", "cache", cache_icon);
+        READ_PREF(string, "Border", "color", border_color);
+        READ_PREF(integer, "Border", "width", border_width);
+        READ_PREF(integer, "Window", "width", window_width);
+        READ_PREF(integer, "Window", "height", window_height);
     }
     g_key_file_free(kf);
 }
+#undef READ_PREF
 
 static void save_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
-    for (size_t i = 0; i < action_list_size; i++)
-    {
+    for (size_t i = 0; i < action_list_size; i++) {
         Action* a = action_list + i;
         if (a->short_key.len > 0)
             g_key_file_set_string(kf, a->name.str, "short_key", a->short_key.str);
@@ -610,11 +636,9 @@ void load_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL))
-        for (size_t i = 0; i < action_list_size; i++)
-        {
+        for (size_t i = 0; i < action_list_size; i++) {
             Action* a = action_list + i;
-            if (g_key_file_has_group(kf, a->name.str))
-            {
+            if (g_key_file_has_group(kf, a->name.str)) {
                 gchar* v = g_key_file_get_string(kf, a->name.str, "short_key", NULL);
                 a->short_key = str_wrap(v);;
                 a->short_key.can_free = true;
@@ -671,8 +695,7 @@ static void run_editor(const char* file)
 
 static void register_hotkey(void)
 {
-    if (!prefs.one_time)
-    {
+    if (!prefs.one_time) {
         keybinder_init();
         keybinder_bind(prefs.hotkey, toggle_window, NULL);
         printf("hit %s to show window\n", prefs.hotkey);
@@ -682,8 +705,7 @@ static void register_hotkey(void)
 // gets run periodically
 static gboolean update_lists_cb(void *data)
 {
-    if (g_static_mutex_trylock(&lists_mutex))
-    {
+    if (g_static_mutex_trylock(&lists_mutex)) {
         reload_settings_and_actions();
         g_static_mutex_unlock(&lists_mutex);
     }
@@ -699,7 +721,7 @@ static void run_updates(void)
 static void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_POPUP);
-    gtk_widget_set_size_request(window, WINDOW_WIDTH, WINDOW_HEIGHT);
+    gtk_widget_set_size_request(window, prefs.window_width, prefs.window_height);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
     gtk_window_set_accept_focus(GTK_WINDOW(window), true);
 
@@ -710,6 +732,7 @@ static void create_widgets(void)
 
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
+    g_signal_connect(vbox, "expose-event", G_CALLBACK(expose_event), 0);
     gtk_widget_show(vbox);
 
     image = gtk_image_new();
@@ -726,10 +749,10 @@ static void create_widgets(void)
     gtk_widget_show(input_label);
 }
 
+// strcasestr it a gnu extension, b must be a static cstring
+#define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
 static const char* get_desktop_env(void)
 {
-    // replacing strcasestr, but it's a gnu extension, b must be a static cstring
-    #define _CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
     // the problem with DESKTOP_SESSION is that some distros put their name there
     char* kde0 = getenv("KDE_SESSION_VERSION");
     char* kde1 = getenv("KDE_FULL_SESSION");
@@ -743,36 +766,34 @@ static const char* get_desktop_env(void)
     current_desktop = current_desktop ? current_desktop : "";
 
     const char* desktop = "Old";
-    if (_CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
+    if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
-    else if (_CONTAINS(session, "gnome") || gnome != NULL)
+    else if (CONTAINS(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
-    else if (_CONTAINS(session, "xfce") || _CONTAINS(xdg_prefix, "xfce"))
+    else if (CONTAINS(session, "xfce") || CONTAINS(xdg_prefix, "xfce"))
         desktop = "XFCE";
-    else if (_CONTAINS(session, "lxde") || _CONTAINS(current_desktop, "lxde"))
+    else if (CONTAINS(session, "lxde") || CONTAINS(current_desktop, "lxde"))
         desktop = "LXDE";
-    else if (_CONTAINS(session, "rox"))
+    else if (CONTAINS(session, "rox"))
         desktop = "ROX";
 
     printf("detected desktop: %s\n", desktop);
     return desktop;
-    #undef _CONTAINS
 }
+#undef CONTAINS
 
 static void parse_commandline(int argc, char** argv)
 {
-    for (int i = 1; i < argc; i++)
-    {
-        if (!strcmp(argv[i], "--one-way"))
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--one-way")) {
             prefs.one_time = true;
-        else if (!strcmp(argv[i], "--help"))
-        {
-            printf("fehlstart 0.2.5 (c) 2011 maep\noptions:\n"\
+        } else if (!strcmp(argv[i], "--help")) {
+            printf("fehlstart 0.2.6 (c) 2011 maep\noptions:\n"\
                 "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
-        }
-        else
+        } else {
             printf("invalid option: %s\n", argv[i]);
+        }
     }
 }
 
@@ -834,8 +855,7 @@ static void settings_action(String command, Action* action)
 
 static void commands_action(String command, Action* action)
 {
-    if (!is_readable_file(commands_file))
-    {
+    if (!is_readable_file(commands_file)) {
         FILE* f = fopen(commands_file, "w");
         if (!f)
             return;
@@ -855,6 +875,7 @@ int main (int argc, char** argv)
 
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
+    g_thread_init(NULL);
 
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
