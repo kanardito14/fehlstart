@@ -256,13 +256,12 @@ static void add_launchers_from_commands(void)
     g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     gchar** groups = g_key_file_get_groups(kf, NULL);
     for (size_t i = 0; groups[i]; i++) {
-        gchar* icon = g_key_file_get_string(kf, groups[i], "Exec", NULL);
         Launch launch = {
             STR_I("!command"), // mark as command
             str_new(groups[i]),
-            str_own(icon),
+            str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
             str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL)),
-            g_themed_icon_new(icon)
+            NULL
         };
         add_launcher(launch);
     }
