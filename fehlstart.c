@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
