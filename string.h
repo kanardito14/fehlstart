@@ -24,23 +24,28 @@ typedef struct
 #define STR_END UINT32_MAX
 
 // wrap a zero terminated string
+// freeing has no effect
 String str_wrap(const char* s);
 
 // wrap a string of length len
+// freeing has no effect
 String str_wrap_n(const char* s, uint32_t len);
 
 // wrap a zero terminated string, and take ownership
+// s will be freed by str_free()
+// must be freed with str_free()
 String str_own(const char* s);
 
-// create a new string from a zero terminated string
+// create a new string as copy of zero terminated string
+// s will not be freed by str_free()
 // must be freed with str_free()
 String str_new(const char* s);
 
-// free strings allocated with str_duplicate, or str_new
+// free strings allocated with str_duplicate, str_own, or str_new
 // safe to use for static strings
 void str_free(String s);
 
-// create an empsty sero padded string
+// create an empsty zero padded string
 // must be freed with str_free()
 String str_create(uint32_t len);
 
