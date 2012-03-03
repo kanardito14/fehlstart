@@ -91,9 +91,7 @@ static Action actions[NUM_ACTIONS] = {
 static struct {
     gchar *hotkey;
     gint update_timeout;
-//    bool strict_matching;
     bool match_executable;
-//    bool cache_icon;
     bool show_icon;
     bool one_time;
     gchar *border_color;
