@@ -534,19 +534,17 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
 
 static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
-    static double r = -1.0, g = -1.0, b = -1.0;
-    
-    if (r == -1.0) {
-        GdkColor color;
-        if (!strcasecmp(prefs.border_color, "default"))
-            color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
-        else
-            gdk_color_parse(prefs.border_color, &color);
+    double r = 0, g = 0, b = 0;
+    GdkColor color;
 
-        r = (double)color.red / 0xffff;
-        g = (double)color.green / 0xffff;
-        b = (double)color.blue / 0xffff;
-    }
+    if (!strcasecmp(prefs.border_color, "default"))
+        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
+    else
+        gdk_color_parse(prefs.border_color, &color);
+
+    r = (double)color.red / 0xffff;
+    g = (double)color.green / 0xffff;
+    b = (double)color.blue / 0xffff;
 
     int width = 0, height = 0;
     gtk_window_get_size(GTK_WINDOW(window), &width, &height); 
@@ -580,8 +578,7 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 }
 
 // macro for writing to keyfile
-#define WRITE_PREF(type, group, key, var) \
-    g_key_file_set_##type (kf, group, key, prefs.var)
+#define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, prefs.var)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
