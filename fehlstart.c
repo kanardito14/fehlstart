@@ -535,20 +535,26 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
 
 static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
-    double r, g, b;
-    GdkColor color;
-    cairo_t *cr = gdk_cairo_create(widget->window);
+    static double r = -1.0, g = -1.0, b = -1.0;
     
-    if (!strcasecmp(prefs.border_color, "default"))
-        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
-    else
-        gdk_color_parse(prefs.border_color, &color);
-    r = (double)color.red / 0xffff;
-    g = (double)color.green / 0xffff;
-    b = (double)color.blue / 0xffff;
+    if (r == -1.0) {
+        GdkColor color;
+        if (!strcasecmp(prefs.border_color, "default"))
+            color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
+        else
+            gdk_color_parse(prefs.border_color, &color);
+
+        r = (double)color.red / 0xffff;
+        g = (double)color.green / 0xffff;
+        b = (double)color.blue / 0xffff;
+    }
+
+    int width = 0, height = 0;
+    gtk_window_get_size(GTK_WINDOW(window), &width, &height); 
     
+    cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgb(cr, r, g, b);
-    cairo_rectangle(cr, 0, 0, gdk_window_get_width(window->window), gdk_window_get_height(window->window));
+    cairo_rectangle(cr, 0, 0, width, height);
     
     /* because we're drawing right at the edge of the window, we need to double
      * the border width to get the expected result */
