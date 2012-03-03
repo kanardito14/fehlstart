@@ -1,31 +1,31 @@
 PREFIX ?= /usr/local
 INSTALLDIR := $(DESTDIR)$(PREFIX)
 
-CC := gcc
+CC = gcc
 
-PKGS := keybinder gio-unix-2.0
-INCS := $(shell pkg-config --cflags $(PKGS))
-LIBS := $(shell pkg-config --libs $(PKGS))
+PKGS = keybinder gio-unix-2.0
+INCS = $(shell pkg-config --cflags $(PKGS))
+LIBS = $(shell pkg-config --libs $(PKGS))
 
 CFLAGS	:= -Wall -Wextra -Wno-unused-parameter -std=c99 $(INCS) $(CFLAGS)
 LDFLAGS	:= $(LIBS) $(LDFLAGS)
 
-SRCS := $(wildcard *.c)
-OBJS := $(SRCS:.c=.o)
+SRCS = $(wildcard *.c)
+OBJS = $(SRCS:.c=.o)
 
-#release flags
-all: CC += -DNDEBUG -O2 -s
+ifeq ($(DEBUG),1)
+    OFLAGS = -DDEBUG -g
+else
+    OFLAGS = -DNDEBUG -O2 -s
+endif
+
 all: fehlstart
 
-#debug flags
-debug: CC += -DDEBUG -g
-debug: fehlstart
-
 fehlstart: $(OBJS)
-	$(CC) -o $@ $(OBJS) $(LDFLAGS)
+	$(CC) -o $@ $(OFLAGS) $(OBJS) $(LDFLAGS)
 
 .c.o:
-	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
+	$(CC) -c $(OFLAGS) $(CFLAGS) $(CPPFLAGS) $< -o $@
 
 install:
 	install -d $(INSTALLDIR)/bin
