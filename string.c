@@ -22,7 +22,9 @@ inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
         n = strlen(s);
     if (n == 0)
         return STR_S("");
-    return (String) {(char*)s, n, can_free};
+    return (String) {
+        (char*)s, n, can_free
+    };
 }
 
 String str_wrap_n(const char* s, uint32_t n)
@@ -42,7 +44,9 @@ String str_own(const char* s)
 
 String str_create(uint32_t len)
 {
-    return (String) {calloc(len + 1, 1), len, true};
+    return (String) {
+        calloc(len + 1, 1), len, true
+    };
 }
 
 String str_new(const char* s)
@@ -111,8 +115,7 @@ inline static int cdiff_i(char a, char b)
 static uint32_t str_find_first_impl(String s, String what, int (*dif) (char, char))
 {
     uint32_t wi = 0;
-    for (uint32_t i = 0; i < s.len && wi < what.len; i++)
-    {
+    for (uint32_t i = 0; i < s.len && wi < what.len; i++) {
         wi = !dif(s.str[i], what.str[wi]) ? wi + 1 : 0;
         if (wi == what.len)
             return i - what.len + 1;

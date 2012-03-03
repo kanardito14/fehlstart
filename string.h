@@ -8,8 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct
-{
+typedef struct {
     char* str;
     uint32_t len;
     bool can_free;

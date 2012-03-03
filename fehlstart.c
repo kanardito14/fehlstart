@@ -42,8 +42,7 @@
 #define INPUT_STRING_SIZE               0x80
 #define SHOW_IGNORE_TIME                100000
 
-typedef struct
-{
+typedef struct {
     String  file;
     String  name;
     String  executable;
@@ -52,8 +51,7 @@ typedef struct
 
 #define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
 
-typedef struct Action_
-{
+typedef struct Action_ {
     String  name;
     String  hidden_key;
     String  short_key;
@@ -90,8 +88,7 @@ static Action actions[NUM_ACTIONS] = {
 // global variables
 
 // preferences
-static struct
-{
+static struct {
     gchar *hotkey;
     gint update_timeout;
 //    bool strict_matching;
@@ -158,15 +155,15 @@ static bool is_readable_file(const char* file)
 
 static const char* get_home_dir(void)
 {
-     const char* home = getenv("HOME");
-     if (!home)
+    const char* home = getenv("HOME");
+    if (!home)
         home = g_get_home_dir();
     return home;
 }
 
 static String get_first_input_word(void)
 {
-    for (uint32_t i = 0;i < input_string_size; i++)
+    for (uint32_t i = 0; i < input_string_size; i++)
         if (input_string[i] == ' ')
             return str_wrap_n(input_string, i);
     return str_wrap_n(input_string, input_string_size);
@@ -189,8 +186,8 @@ static bool load_launcher(String file, Launch* launcher)
 {
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
     bool used = (info != 0) &&
-        !g_desktop_app_info_get_is_hidden(info) &&
-        g_app_info_should_show(G_APP_INFO(info));
+                !g_desktop_app_info_get_is_hidden(info) &&
+                g_app_info_should_show(G_APP_INFO(info));
 
     if (used) {
         GAppInfo* app = G_APP_INFO(info);
@@ -199,7 +196,7 @@ static bool load_launcher(String file, Launch* launcher)
         if (prefs.match_executable)
             launcher->executable = str_new(g_app_info_get_executable(app));
         GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (prefs.show_icon) 
+        if (prefs.show_icon)
             launcher->icon_name = str_own(g_icon_to_string(icon));
     }
 
@@ -306,10 +303,10 @@ static void update_action_list(void)
             0,              // score
             l,              // data
             launch_action   // action
-    };
+        };
         add_action(&action);
     }
-    for (size_t i = 0; i < NUM_ACTIONS; i++) 
+    for (size_t i = 0; i < NUM_ACTIONS; i++)
         add_action(actions + i);
 }
 
@@ -361,9 +358,10 @@ static void filter_action_list(String filter)
     g_static_mutex_unlock(&lists_mutex);
 }
 
-static void run_selected(void) {
+static void run_selected(void)
+{
     g_static_mutex_lock(&lists_mutex);
-                                // check in case async list update fails
+    // check in case async list update fails
     if (filter_list_size > 0 && filter_list_choice < action_list_size) {
         Action* action = filter_list[filter_list_choice];
         if (action->action != 0) {
@@ -427,8 +425,8 @@ static void handle_text_input(GdkEventKey* event)
     if (event->keyval == GDK_BackSpace && input_string_size > 0)
         input_string_size--;
     else if (event->length == 1 &&
-        (input_string_size + 1) < INPUT_STRING_SIZE &&
-        (input_string_size > 0 || event->keyval != GDK_space))
+             (input_string_size + 1) < INPUT_STRING_SIZE &&
+             (input_string_size > 0 || event->keyval != GDK_space))
         input_string[input_string_size++] = event->keyval;
 
     input_string[input_string_size] = 0;
@@ -523,7 +521,7 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     GdkColor color;
 
     if (!strcasecmp(prefs.border_color, "default"))
-        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED]; 
+        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED];
     else
         gdk_color_parse(prefs.border_color, &color);
 
@@ -532,18 +530,18 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     b = (double)color.blue / 0xffff;
 
     int width = 0, height = 0;
-    gtk_window_get_size(GTK_WINDOW(window), &width, &height); 
-    
+    gtk_window_get_size(GTK_WINDOW(window), &width, &height);
+
     cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgb(cr, r, g, b);
     cairo_rectangle(cr, 0, 0, width, height);
-    
+
     /* because we're drawing right at the edge of the window, we need to double
      * the border width to get the expected result */
     cairo_set_line_width(cr, prefs.border_width * 2);
     cairo_stroke(cr);
     cairo_destroy(cr);
-    
+
     return false;
 }
 
@@ -771,7 +769,7 @@ static void parse_commandline(int argc, char** argv)
             prefs.one_time = true;
         } else if (!strcmp(argv[i], "--help")) {
             printf("fehlstart 0.2.7 (c) 2011 maep\noptions:\n"\
-                "\t--one-way\texit after one use\n");
+                   "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         } else {
             printf("invalid option: %s\n", argv[i]);
@@ -792,8 +790,8 @@ static void run_command(String command, Launch* launch)
     // extract args from command
     uint32_t sp = str_find_first(command, STR_S(" "));
     String cmd = (sp == STR_END) ?
-        str_duplicate(launch->executable) :
-        str_concat(launch->executable, str_substring(command, sp, STR_END));
+                 str_duplicate(launch->executable) :
+                 str_concat(launch->executable, str_substring(command, sp, STR_END));
     printf("%s\n", cmd.str);
     if (system(cmd.str)) {}; // to shut up gcc
     str_free(cmd);
@@ -842,7 +840,7 @@ static void commands_action(String command, Action* action)
         if (!f)
             return;
         fputs("#example: 'run top' would start top in xterm\n"\
-            "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
+              "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
         fclose(f);
     }
     run_editor(commands_file);
