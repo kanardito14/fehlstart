@@ -48,10 +48,9 @@ typedef struct
     String  name;
     String  executable;
     String  icon_name;
-    GIcon*  icon;
 } Launch;
 
-#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), NULL}
+#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
 
 typedef struct Action_
 {
@@ -60,12 +59,11 @@ typedef struct Action_
     String  short_key;
     String  icon_name;
     int     score;
-    GIcon*  icon;
     void*   data;
     void    (*action) (String, struct Action_*);
 } Action;
 
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL, NULL}
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
@@ -78,7 +76,7 @@ static void quit_action(String, Action*);
 //------------------------------------------
 // build-in actions
 
-#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, NULL, action}
+#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, action}
 #define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
     MKA("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
@@ -96,9 +94,9 @@ static struct
 {
     gchar *hotkey;
     gint update_timeout;
-    bool strict_matching;
+//    bool strict_matching;
     bool match_executable;
-    bool cache_icon;
+//    bool cache_icon;
     bool show_icon;
     bool one_time;
     gchar *border_color;
@@ -108,9 +106,7 @@ static struct
 } prefs = {
     DEFAULT_HOTKEY,     // hotkey
     15,                 // update_timeout
-    false,              // strict_matching
     true,               // match_executable
-    true,               // cache_icon
     true,               // show_icon
     false,              // one_time
     "default",          // border_color
@@ -203,10 +199,8 @@ static bool load_launcher(String file, Launch* launcher)
         if (prefs.match_executable)
             launcher->executable = str_new(g_app_info_get_executable(app));
         GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (prefs.show_icon)
+        if (prefs.show_icon) 
             launcher->icon_name = str_own(g_icon_to_string(icon));
-        if (prefs.show_icon && prefs.cache_icon)
-            launcher->icon = G_ICON(g_object_ref(icon));
     }
 
     g_object_unref(info);
@@ -219,7 +213,6 @@ static void free_launcher(Launch* launcher)
     str_free(launcher->name);
     str_free(launcher->executable);
     str_free(launcher->icon_name);
-    g_object_unref(launcher->icon);
 }
 
 static void clear_launch_list(void)
@@ -261,8 +254,7 @@ static void add_launchers_from_commands(void)
             STR_I("!command"), // mark as command
             str_new(groups[i]),
             str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
-            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL)),
-            NULL
+            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL))
         };
         add_launcher(launch);
     }
@@ -312,17 +304,13 @@ static void update_action_list(void)
             STR_S(""),      // short_key
             l->icon_name,   // icon_name
             0,              // score
-            l->icon,        // icon
             l,              // data
             launch_action   // action
     };
         add_action(&action);
     }
-    for (size_t i = 0; i < NUM_ACTIONS; i++) {
-        if (actions[i].icon == NULL && actions[i].icon_name.len > 0 && prefs.show_icon)
-            actions[i].icon = g_themed_icon_new(actions[i].icon_name.str);
+    for (size_t i = 0; i < NUM_ACTIONS; i++) 
         add_action(actions + i);
-    }
 }
 
 // calculates a score that determines in which order the results are displayed
@@ -391,14 +379,12 @@ static void run_selected(void) {
 //------------------------------------------
 // gui functions
 
-static void image_set_icon(GtkImage* img, const char* name, GIcon* icon)
+static void image_set_icon(GtkImage* img, const char* name)
 {
     if (!prefs.show_icon)
         return;
-    if (icon) {
-        gtk_image_set_from_gicon(img, icon, ICON_SIZE);
-        return;
-    }
+
+    GIcon* icon = NULL;
 
     if (g_path_is_absolute(name)) {
         GFile* file = g_file_new_for_path(name);
@@ -416,7 +402,6 @@ static void show_selected(void)
 {
     const char* action_text = NO_MATCH_MESSAGE;
     const char* icon_name = NO_MATCH_ICON;
-    GIcon* icon = NULL;
 
     g_static_mutex_lock(&lists_mutex);
     if (input_string_size == 0) {
@@ -425,13 +410,12 @@ static void show_selected(void)
     } else if (filter_list_size > 0 && filter_list_size <= action_list_size) {
         action_text = filter_list[filter_list_choice]->name.str;
         icon_name = filter_list[filter_list_choice]->icon_name.str;
-        icon = filter_list[filter_list_choice]->icon;
     }
     g_static_mutex_unlock(&lists_mutex);
 
     gtk_label_set_text(GTK_LABEL(input_label), input_string);
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
-    image_set_icon(GTK_IMAGE(image), icon_name, icon);
+    image_set_icon(GTK_IMAGE(image), icon_name);
 
     gtk_widget_queue_draw(input_label);
     gtk_widget_queue_draw(action_label);
@@ -585,11 +569,9 @@ static void save_config(void)
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     WRITE_PREF(string, "Bindings", "launch", hotkey);
-    WRITE_PREF(boolean, "Matching", "strict", strict_matching);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
     WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
-    WRITE_PREF(boolean, "Icons", "cache", cache_icon);
     WRITE_PREF(string, "Border", "color", border_color);
     WRITE_PREF(integer, "Border", "width", border_width);
     WRITE_PREF(integer, "Window", "width", window_width);
@@ -606,14 +588,11 @@ static void save_config(void)
 static void read_config(void)
 {
     GKeyFile *kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL))
-    {
+    if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL)) {
         READ_PREF(string, "Bindings", "launch", hotkey);
-        READ_PREF(boolean, "Matching", "strict", strict_matching);
         READ_PREF(boolean, "Matching", "executable", match_executable);
         READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
-        READ_PREF(boolean, "Icons", "cache", cache_icon);
         READ_PREF(string, "Border", "color", border_color);
         READ_PREF(integer, "Border", "width", border_width);
         READ_PREF(integer, "Window", "width", window_width);
