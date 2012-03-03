@@ -14,7 +14,7 @@ SRCS := $(wildcard *.c)
 OBJS := $(SRCS:.c=.o)
 
 #release flags
-all: CC += -DNDEBUG -O2
+all: CC += -DNDEBUG -O2 -s
 all: fehlstart
 
 #debug flags
