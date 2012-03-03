@@ -790,7 +790,7 @@ static void parse_commandline(int argc, char** argv)
         if (!strcmp(argv[i], "--one-way")) {
             prefs.one_time = true;
         } else if (!strcmp(argv[i], "--help")) {
-            printf("fehlstart 0.2.6 (c) 2011 maep\noptions:\n"\
+            printf("fehlstart 0.2.7 (c) 2011 maep\noptions:\n"\
                 "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         } else {
