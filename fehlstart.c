@@ -194,7 +194,7 @@ static bool load_launcher(String file, Launch* launcher)
         if (prefs.match_executable)
             launcher->executable = str_new(g_app_info_get_executable(app));
         GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (prefs.show_icon)
+        if (icon != NULL && prefs.show_icon)
             launcher->icon_name = str_own(g_icon_to_string(icon));
     }
 
