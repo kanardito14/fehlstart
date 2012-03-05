@@ -183,10 +183,10 @@ static void add_launcher(Launch launch)
 static bool load_launcher(String file, Launch* launcher)
 {
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
-    bool used = (info != 0) &&
-                !g_desktop_app_info_get_is_hidden(info) &&
+    if (!info)
+        return false;
+    bool used = !g_desktop_app_info_get_is_hidden(info) &&
                 g_app_info_should_show(G_APP_INFO(info));
-
     if (used) {
         GAppInfo* app = G_APP_INFO(info);
         launcher->file = file;
@@ -197,7 +197,6 @@ static bool load_launcher(String file, Launch* launcher)
         if (icon != NULL && prefs.show_icon)
             launcher->icon_name = str_own(g_icon_to_string(icon));
     }
-
     g_object_unref(info);
     return used;
 }
