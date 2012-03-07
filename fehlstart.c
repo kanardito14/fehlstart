@@ -458,6 +458,7 @@ static void show_window(void)
     gtk_window_present(GTK_WINDOW(window));
     gtk_window_set_keep_above(GTK_WINDOW(window), true);
     gdk_keyboard_grab(window->window, true, GDK_CURRENT_TIME);
+    gdk_pointer_grab(window->window, true, GDK_BUTTON_PRESS_MASK, NULL, NULL, GDK_CURRENT_TIME);
 }
 
 static void toggle_window(const char *keystring, void *data)
@@ -466,6 +467,12 @@ static void toggle_window(const char *keystring, void *data)
         hide_window();
     else
         show_window();
+}
+
+static gboolean button_press_event(GtkWidget* widget, GdkEvent *event, gpointer data)
+{
+    hide_window();
+    return true;
 }
 
 static void destroy(GtkWidget* widget, gpointer data)
@@ -700,12 +707,12 @@ static void create_widgets(void)
     window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_size_request(window, prefs.window_width, prefs.window_height);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
-    gtk_window_set_accept_focus(GTK_WINDOW(window), true);
 
-    gtk_widget_add_events(window, GDK_KEY_PRESS_MASK);
+    gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
     g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), 0);
     g_signal_connect(window, "destroy", G_CALLBACK(destroy), 0);
     g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), 0);
+    g_signal_connect(window, "button-press-event", G_CALLBACK(button_press_event), 0);
 
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
