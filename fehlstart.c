@@ -315,8 +315,7 @@ static void update_action_score(Action* action, String filter, time_t zeit)
 {
     int score = -1;
     if (str_starts_with(action->short_key, filter)) {
-        time_t tdiff = zeit - action->time;
-        score = (tdiff < MIN(INT_MAX - 10000, zeit)) ? INT_MAX - (int)tdiff : 10000;
+        score = 100000;
     }
 
     if (score < 0) {
@@ -329,6 +328,12 @@ static void update_action_score(Action* action, String filter, time_t zeit)
         uint32_t pos = str_find_first_i(action->hidden_key, filter);
         if (pos != STR_END)
             score = 1 + (filter.len - pos);
+    }
+
+    if (score > 0) {
+        time_t tdiff = zeit - action->time;
+        if (tdiff < MIN(INT_MAX - 100000, zeit)) 
+            score += ((INT_MAX - 100000) - (int)tdiff);
     }
     action->score = score;
 }
