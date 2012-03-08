@@ -147,7 +147,7 @@ bool str_contains_i(String s, String what)
 
 static bool str_starts_with_impl(String s, String prefix, int (*dif) (char, char))
 {
-    if (s.len < prefix.len)
+    if (prefix.len == 0 || s.len < prefix.len)
         return false;
     for (uint32_t i = 0; i < prefix.len; i++)
         if (dif(s.str[i], prefix.str[i]))
@@ -157,7 +157,7 @@ static bool str_starts_with_impl(String s, String prefix, int (*dif) (char, char
 
 static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
 {
-    if (s.len < suffix.len)
+    if (suffix.len == 0 || s.len < suffix.len)
         return false;
     for (uint32_t i = 1; i <= suffix.len; i++)
         if (dif(s.str[s.len - i], suffix.str[suffix.len - i]))

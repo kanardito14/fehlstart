@@ -7,6 +7,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include <strings.h>
 #include <dirent.h>
@@ -57,11 +58,12 @@ typedef struct Action_ {
     String  short_key;
     String  icon_name;
     int     score;
+    time_t  time;
     void*   data;
     void    (*action) (String, struct Action_*);
 } Action;
 
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, NULL, NULL}
+#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, 0, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
@@ -74,7 +76,7 @@ static void quit_action(String, Action*);
 //------------------------------------------
 // build-in actions
 
-#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, NULL, action}
+#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, 0, NULL, action}
 #define NUM_ACTIONS 4
 static Action actions[NUM_ACTIONS] = {
     MKA("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
@@ -298,6 +300,7 @@ static void update_action_list(void)
             STR_S(""),      // short_key
             l->icon_name,   // icon_name
             0,              // score
+            0,              // time
             l,              // data
             launch_action   // action
         };
@@ -308,11 +311,13 @@ static void update_action_list(void)
 }
 
 // calculates a score that determines in which order the results are displayed
-static void update_action_score(Action* action, String filter)
+static void update_action_score(Action* action, String filter, time_t zeit)
 {
     int score = -1;
-    if (str_starts_with(action->short_key, filter))
-        score = 10000 + (INPUT_STRING_SIZE - action->short_key.len);
+    if (str_starts_with(action->short_key, filter)) {
+        time_t tdiff = zeit - action->time;
+        score = (tdiff < MIN(INT_MAX - 10000, zeit)) ? INT_MAX - (int)tdiff : 10000;
+    }
 
     if (score < 0) {
         uint32_t pos = str_find_first_i(action->name, filter);
@@ -344,9 +349,10 @@ static void filter_action_list(String filter)
         filter_list = realloc(filter_list, filter_list_capacity * sizeof(Action*));
     }
 
+    time_t zeit = time(NULL);
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++) {
-        update_action_score(action_list + i, filter);
+        update_action_score(action_list + i, filter, zeit);
         if (action_list[i].score > 0)
             filter_list[filter_list_size++] = action_list + i;
     }
@@ -364,6 +370,7 @@ static void run_selected(void)
         if (action->action != 0) {
             str_free(action->short_key);
             action->short_key = str_duplicate(get_first_input_word());
+            action->time = time(NULL);
             String str = str_wrap_n(input_string, input_string_size);
             action->action(str, action);
         }
@@ -609,8 +616,10 @@ static void save_actions(void)
     GKeyFile* kf = g_key_file_new();
     for (size_t i = 0; i < action_list_size; i++) {
         Action* a = action_list + i;
-        if (a->short_key.len > 0)
+        if (a->short_key.len > 0) {
             g_key_file_set_string(kf, a->name.str, "short_key", a->short_key.str);
+            g_key_file_set_uint64(kf, a->name.str, "time", (uint64_t)a->time);
+        }
     }
     key_file_save(kf, action_file);
     g_key_file_free(kf);
@@ -619,15 +628,16 @@ static void save_actions(void)
 void load_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL))
+    if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL)) {
         for (size_t i = 0; i < action_list_size; i++) {
             Action* a = action_list + i;
             if (g_key_file_has_group(kf, a->name.str)) {
-                gchar* v = g_key_file_get_string(kf, a->name.str, "short_key", NULL);
-                a->short_key = str_wrap(v);;
-                a->short_key.can_free = true;
+                char* s = g_key_file_get_string(kf, a->name.str, "short_key", NULL);
+                a->short_key = str_own(s);
+                a->time = (time_t)g_key_file_get_uint64(kf, a->name.str, "time", NULL);
             }
         }
+    }
     g_key_file_free(kf);
 }
 
