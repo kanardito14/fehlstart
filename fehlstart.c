@@ -712,7 +712,7 @@ static void register_hotkey(void)
         gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Quit", GTK_RESPONSE_REJECT, 
                             "Quit and Edit Settings", GTK_RESPONSE_ACCEPT, NULL);
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
-            {}; // launch editor
+            settings_action(STR_S(""), NULL); // launch editor
         gtk_widget_destroy(dialog);
         exit(EXIT_FAILURE);
     }
