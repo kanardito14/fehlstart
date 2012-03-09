@@ -91,17 +91,21 @@ static Action actions[NUM_ACTIONS] = {
 
 // preferences
 static struct {
-    gchar *hotkey;
-    gint update_timeout;
-    bool match_executable;
-    bool show_icon;
-    bool one_time;
-    gchar *border_color;
-    gint border_width;
-    gint window_width;
-    gint window_height;
+    gchar*  hotkey;
+    guint   hotkey_key;
+    GdkModifierType hotkey_mod;
+    gint    update_timeout;
+    bool    match_executable;
+    bool    show_icon;
+    bool    one_time;
+    gchar*  border_color;
+    gint    border_width;
+    gint    window_width;
+    gint    window_height;
 } prefs = {
     DEFAULT_HOTKEY,     // hotkey
+    0,                  // hotkey_key set by register_hotkey()
+    0,                  // hotkey_mask set by register_hotkey()
     15,                 // update_timeout
     true,               // match_executable
     true,               // show_icon
@@ -311,7 +315,7 @@ static void update_action_list(void)
 }
 
 // calculates a score that determines in which order the results are displayed
-static void update_action_score(Action* action, String filter, time_t zeit)
+static void update_action_score(Action* action, String filter)
 {
     int score = -1;
     if (str_starts_with(action->short_key, filter)) {
@@ -329,18 +333,14 @@ static void update_action_score(Action* action, String filter, time_t zeit)
         if (pos != STR_END)
             score = 1 + (filter.len - pos);
     }
-
-    if (score > 0) {
-        time_t tdiff = zeit - action->time;
-        if (tdiff < MIN(INT_MAX - 100000, zeit)) 
-            score += ((INT_MAX - 100000) - (int)tdiff);
-    }
     action->score = score;
 }
 
 inline static int cmp_action_score(const void* a, const void* b)
 {
-    return (*((Action**)b))->score - (*((Action**)a))->score;
+    Action* a1 = *((Action**)a);
+    Action* a2 = *((Action**)b);
+    return (a2->score - a1->score) + (a2->time > a1->time ? -1 : 1);
 }
 
 static void filter_action_list(String filter)
@@ -354,10 +354,9 @@ static void filter_action_list(String filter)
         filter_list = realloc(filter_list, filter_list_capacity * sizeof(Action*));
     }
 
-    time_t zeit = time(NULL);
     filter_list_size = 0;
     for (size_t i = 0; i < action_list_size; i++) {
-        update_action_score(action_list + i, filter, zeit);
+        update_action_score(action_list + i, filter);
         if (action_list[i].score > 0)
             filter_list[filter_list_size++] = action_list + i;
     }
@@ -524,8 +523,14 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         show_selected();
         break;
     default:
-        handle_text_input(event);
-        show_selected();
+        // the keybind-thingie doesn't work when the popup window
+        // grabs the keyboard focus, it has to be caught like this
+        if ((event->state & prefs.hotkey_mod) && (event->keyval == prefs.hotkey_key)) {
+            hide_window();
+        } else {
+            handle_text_input(event);
+            show_selected();
+        }
         break;
     }
     return true;
@@ -694,10 +699,22 @@ static void run_editor(const char* file)
 
 static void register_hotkey(void)
 {
-    if (!prefs.one_time) {
-        keybinder_init();
-        keybinder_bind(prefs.hotkey, toggle_window, NULL);
+    if (prefs.one_time)
+        return;
+    keybinder_init();
+    if (keybinder_bind(prefs.hotkey, toggle_window, NULL)) {
+        gtk_accelerator_parse(prefs.hotkey, &prefs.hotkey_key, &prefs.hotkey_mod);
         printf("hit %s to show window\n", prefs.hotkey);
+    } else {
+        GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
+                            GTK_MESSAGE_ERROR, GTK_BUTTONS_NONE,
+                            "Fehlstart can't use hotkey '%s'.", prefs.hotkey);
+        gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Quit", GTK_RESPONSE_REJECT, 
+                            "Quit and Edit Settings", GTK_RESPONSE_ACCEPT, NULL);
+        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
+            {}; // launch editor
+        gtk_widget_destroy(dialog);
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -787,7 +804,7 @@ static void parse_commandline(int argc, char** argv)
         if (!strcmp(argv[i], "--one-way")) {
             prefs.one_time = true;
         } else if (!strcmp(argv[i], "--help")) {
-            printf("fehlstart 0.2.7 (c) 2011 maep\noptions:\n"\
+            printf("fehlstart 0.2.8 (c) 2012 maep\noptions:\n"\
                    "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         } else {
