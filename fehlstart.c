@@ -340,7 +340,7 @@ inline static int cmp_action_score(const void* a, const void* b)
 {
     Action* a1 = *((Action**)a);
     Action* a2 = *((Action**)b);
-    return (a2->score - a1->score) + (a2->time > a1->time ? -1 : 1);
+    return (a2->score - a1->score) + (a2->time < a1->time ? -1 : 1);
 }
 
 static void filter_action_list(String filter)
