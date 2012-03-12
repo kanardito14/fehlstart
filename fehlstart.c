@@ -387,21 +387,20 @@ static void run_selected(void)
 
 static void image_set_icon(GtkImage* img, const char* name)
 {
-    if (!prefs.show_icon)
-        return;
-
-    GIcon* icon = NULL;
-
-    if (g_path_is_absolute(name)) {
-        GFile* file = g_file_new_for_path(name);
-        icon = g_file_icon_new(file);
-        g_object_unref(file);
+    if (prefs.show_icon) {
+        GIcon* icon = NULL;
+        if (g_path_is_absolute(name)) {
+            GFile* file = g_file_new_for_path(name);
+            icon = g_file_icon_new(file);
+            g_object_unref(file);
+        } else {
+            icon = g_themed_icon_new(name);
+        }
+        gtk_image_set_from_gicon(img, icon, ICON_SIZE);
+        g_object_unref(icon);
     } else {
-        icon = g_themed_icon_new(name);
+        gtk_image_clear(img);
     }
-
-    gtk_image_set_from_gicon(img, icon, ICON_SIZE);
-    g_object_unref(icon);
 }
 
 static void show_selected(void)
@@ -752,7 +751,6 @@ static void create_widgets(void)
     gtk_widget_show(vbox);
 
     image = gtk_image_new();
-    gtk_image_set_from_icon_name(GTK_IMAGE(image), DEFAULT_ICON, ICON_SIZE);
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
     gtk_widget_show(image);
 
@@ -875,7 +873,7 @@ static void commands_action(String command, Action* action)
         FILE* f = fopen(commands_file, "w");
         if (!f)
             return;
-        fputs("#example: 'run top' would start top in xterm\n"\
+        fputs("#example: run a command in xterm\n#'run top' will start top in xterm\n"\
               "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
         fclose(f);
     }
