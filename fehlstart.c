@@ -580,6 +580,21 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
     fclose(f);
 }
 
+#if !GLIB_CHECK_VERSION(2,26,0)
+static void g_key_file_set_uint64(GKeyFile* kf, const char* group, const char* key, uint64_t value)
+{
+    gchar* str_value = g_strdup_printf("%llu", (unsigned long long)value);
+    g_key_file_set_string(kf, group, key, str_value);
+    g_free(str_value);
+}
+
+static uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error)
+{
+    gchar* value = g_key_file_get_string(kf, group, key, error);
+    return value ? g_ascii_strtoull(value, 0, 10) : 0;
+}
+#endif
+
 // macro for writing to keyfile
 #define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, prefs.var)
 static void save_config(void)
