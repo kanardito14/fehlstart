@@ -44,7 +44,7 @@ String str_new(const char* s);
 // safe to use for static strings
 void str_free(String s);
 
-// create an empsty zero padded string
+// create an empty zero padded string
 // must be freed with str_free()
 String str_create(uint32_t len);
 
@@ -53,6 +53,7 @@ String str_create(uint32_t len);
 String str_duplicate(String s);
 
 // concatinate (append) two strings
+// a and b remain unchanged
 // must be freed with str_free()
 String str_concat(String a, String b);
 
