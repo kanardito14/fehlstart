@@ -3,6 +3,11 @@
 *   this source is published under the GPLv3 license.
 *   get the license from: http://www.gnu.org/licenses/gpl-3.0.txt
 *   copyright 2011 maep and contributors
+*
+*   some terminology:
+*   action: the thing that the user selects
+*   launcher: program launcher defined by a .desktop file
+*   command: user defined action from commands.rc file
 */
 
 #include <string.h>
@@ -14,6 +19,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
@@ -27,124 +33,73 @@
 // macros
 #define WELCOME_MESSAGE     "type something"
 #define NO_MATCH_MESSAGE    "no match"
-
+#define APPLICATION_ICON    "applications-other"
 #define DEFAULT_HOTKEY      "<Super>space"
-
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 #define DEFAULT_ICON        GTK_STOCK_FIND
 #define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
-#define APPLICATION_ICON    "applications-other"
+#define INPUT_STRING_SIZE   0x80
+#define SHOW_IGNORE_TIME    100000
+#define APPLICATIONS_DIR_0  "/usr/share/applications"
+#define APPLICATIONS_DIR_1  "/usr/local/share/applications"
+#define USER_APPLICATIONS_DIR   ".local/share/applications"
 
-#define APPLICATIONS_DIR_0              "/usr/share/applications"
-#define APPLICATIONS_DIR_1              "/usr/local/share/applications"
-#define USER_APPLICATIONS_DIR           ".local/share/applications"
-
-#define INITIAL_LAUNCH_LIST_CAPACITY    0xff
-#define INPUT_STRING_SIZE               0x80
-#define SHOW_IGNORE_TIME                100000
-
-typedef struct {
-    String  file;
-    String  name;
-    String  executable;
-    String  icon_name;
-} Launch;
-
-#define LAUNCH_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S("")}
-
-typedef struct Action_ {
-    String  name;
-    String  hidden_key;
-    String  short_key;
-    String  icon_name;
-    int     score;
-    time_t  time;
-    void*   data;
-    void    (*action) (String, struct Action_*);
+typedef struct Action {
+    String  key;                // map key, .desktop file
+    time_t  file_time;          // .desktop time stamp
+    String  name;               // display caption
+    String  exec;               // executable / hint
+    String  mnemonic;           // what user typed
+    String  icon;
+    int     score;              // calculated prority
+    time_t  time;               // last used timestamp
+    void    (*action)(String, struct Action*);
+    bool    used;               // unused actions are kept for caching
 } Action;
-
-#define ACTION_INITIALIZER {STR_S(""), STR_S(""), STR_S(""), STR_S(""), 0, 0, NULL, NULL}
 
 //------------------------------------------
 // forward declarations
 
 static void launch_action(String, Action*);
-static void settings_action(String, Action*);
-static void commands_action(String, Action*);
-static void update_action(String, Action*);
-static void quit_action(String, Action*);
-//------------------------------------------
-// build-in actions
-
-#define MKA(name, hint, icon, action) {STR_I(name), STR_I(hint), STR_I(""), STR_I(icon), 0, 0, NULL, action}
-#define NUM_ACTIONS 4
-static Action actions[NUM_ACTIONS] = {
-    MKA("update fehlstart", "reload", GTK_STOCK_REFRESH, update_action),
-    MKA("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action),
-    MKA("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, settings_action),
-    MKA("fehlstart commands", "", GTK_STOCK_EXECUTE, commands_action)
-};
-#undef MKA
+static void command_action(String, Action*);
+static void edit_settings_action(String, Action*);
 
 //------------------------------------------
 // global variables
 
 // preferences
-static struct {
-    gchar*  hotkey;
-    guint   hotkey_key;
-    GdkModifierType hotkey_mod;
-    gint    update_timeout;
-    bool    match_executable;
-    bool    show_icon;
-    bool    one_time;
-    gchar*  border_color;
-    gint    border_width;
-    gint    window_width;
-    gint    window_height;
-} prefs = {
-    DEFAULT_HOTKEY,     // hotkey
-    0,                  // hotkey_key set by register_hotkey()
-    0,                  // hotkey_mask set by register_hotkey()
-    15,                 // update_timeout
-    true,               // match_executable
-    true,               // show_icon
-    false,              // one_time
-    "default",          // border_color
-    1,                  // border_width
-    200,                // window_width
-    100                 // window_height
-};
+static char*    pref_hotkey = DEFAULT_HOTKEY;
+static unsigned pref_hotkey_key;
+static bool     pref_match_executable = true;
+static bool     pref_show_icon = true;
+static bool     pref_one_time;
+static char*    pref_border_color = "default";
+static int      pref_border_width = 1;
+static int      pref_window_width = 200;
+static int      pref_window_height = 100;
+static GdkModifierType pref_hotkey_mod;
 
 // launcher stuff
-static Launch* launch_list = NULL;
-static uint32_t launch_list_capacity = 0;
-static uint32_t launch_list_size = 0;
-
-static Action* action_list = NULL;
-static uint32_t action_list_capacity = 0;
-static uint32_t action_list_size = 0;
-
-static Action** filter_list = NULL;
-static uint32_t filter_list_capacity = 0;
-static uint32_t filter_list_size = 0;
-static uint32_t filter_list_choice = 0;
-
-static char input_string[INPUT_STRING_SIZE];
-static uint32_t input_string_size = 0;
-
-static GStaticMutex lists_mutex = G_STATIC_MUTEX_INIT;
+static GHashTable*  action_map;
+static GArray*      filter_list;
+static unsigned     selection;
+static char         input_string[INPUT_STRING_SIZE];
+static unsigned     input_string_size;
+static pthread_mutex_t map_mutex;
 
 // gtk widgets
-static GtkWidget* window = NULL;
-static GtkWidget* image = NULL;
-static GtkWidget* action_label = NULL;
-static GtkWidget* input_label = NULL;
+static GtkWidget*   window;
+static GtkWidget*   image;
+static GtkWidget*   action_label;
+static GtkWidget*   input_label;
 
-static char* config_file = 0;
-static char* action_file = 0;
-static char* commands_file = 0;
-static char* user_app_dir = 0;
+// files
+static char*    config_file;
+static char*    action_file;
+static char*    commands_file;
+static time_t   config_file_time;
+static time_t   commands_file_time;
+static char*    user_app_dir;
 
 //------------------------------------------
 // helper functions
@@ -174,172 +129,189 @@ static String get_first_input_word(void)
 }
 
 //------------------------------------------
-// launcher function
+// action functions
 
-static void add_launcher(Launch launch)
+static void add_action(const char* name, const char* hint, const char* icon, void (*action)(String, Action*))
 {
-    if (launch_list_size + 1 > launch_list_capacity) {
-        launch_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
-        launch_list = realloc(launch_list, launch_list_capacity * sizeof(Launch));
-    }
-    launch_list[launch_list_size] = launch;
-    launch_list_size++;
+    Action* a = calloc(1, sizeof(Action));
+    a->key = str_new(name);
+    a->name = str_new(name);
+    a->exec = str_new(hint);
+    a->icon = str_new(icon);
+    a->action = action;
+    a->used = true;
+    g_hash_table_insert(action_map, a->key.str, a);
 }
 
-static bool load_launcher(String file, Launch* launcher)
+static void free_action(gpointer data)
 {
+    Action* a = data;
+    str_free(a->key);
+    str_free(a->name);
+    str_free(a->icon);
+    str_free(a->exec);
+    str_free(a->mnemonic);
+    free(a);
+}
+
+static void load_launcher(String file, Action* action)
+{
+    struct stat st = {0};
+    stat(file.str, &st);
+    action->file_time = st.st_mtime;
+    action->action = launch_action;
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
     if (!info)
-        return false;
-    bool used = !g_desktop_app_info_get_is_hidden(info) &&
-                g_app_info_should_show(G_APP_INFO(info));
-    if (used) {
+        return;
+    action->used = !g_desktop_app_info_get_is_hidden(info) && g_app_info_should_show(G_APP_INFO(info));
+    if (action->used) {
         GAppInfo* app = G_APP_INFO(info);
-        launcher->file = file;
-        launcher->name = str_new(g_app_info_get_name(app));
-        if (prefs.match_executable)
-            launcher->executable = str_new(g_app_info_get_executable(app));
+        action->name = str_new(g_app_info_get_name(app));
+        if (pref_match_executable)
+            action->exec = str_new(g_app_info_get_executable(app));
         GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (icon != NULL && prefs.show_icon)
-            launcher->icon_name = str_own(g_icon_to_string(icon));
+        if (icon != NULL && pref_show_icon)
+            action->icon = str_own(g_icon_to_string(icon));
     }
     g_object_unref(info);
-    return used;
 }
 
-static void free_launcher(Launch* launcher)
+static void reload_launcher (Action* action)
 {
-    str_free(launcher->file);
-    str_free(launcher->name);
-    str_free(launcher->executable);
-    str_free(launcher->icon_name);
+    str_free(action->name);
+    str_free(action->exec);
+    str_free(action->icon);
+    action->used = false;
+    load_launcher(action->key, action);
 }
 
-static void clear_launch_list(void)
+static Action* new_launcher(String file)
 {
-    for (uint32_t i = 0; i < launch_list_size; i++)
-        free_launcher(launch_list + i);
-    launch_list_size = 0;
+    Action* a = calloc(1, sizeof(Action));
+    a->key = file;
+    load_launcher(file, a);
+    return a;
 }
 
-static void add_launchers_from_dir(String dir_name)
+static void update_launcher(gpointer key, gpointer value, gpointer user_data)
+{
+    Action* a = value;
+    struct stat st = {0};
+    if (a->action != launch_action)
+        return;
+    if (stat(a->key.str, &st))
+        a->used = false;
+    else if (a->file_time != st.st_mtime)
+        reload_launcher(a);
+}
+
+static void add_launchers(String dir_name)
 {
     DIR* dir = opendir(dir_name.str);
-    if (dir == 0)
+    if (!dir)
         return;
     printf("reading %s\n", dir_name.str);
-
-    struct dirent* ent = 0;
-    while ((ent = readdir(dir)) != 0) {
+    struct dirent* ent = NULL;
+    while ((ent = readdir(dir))) {
         String file_name = str_wrap(ent->d_name);
-        if (str_ends_with_i(file_name, STR_S(".desktop"))) {
-            String full_path = str_assemble_path(dir_name, file_name);
-            Launch launcher = LAUNCH_INITIALIZER;
-            if (load_launcher(full_path, &launcher))
-                add_launcher(launcher);
-            else
-                str_free(full_path);
+        if (!str_ends_with_i(file_name, STR_S(".desktop")))
+            continue;
+        String full_path = str_assemble_path(dir_name, file_name);
+        if (g_hash_table_contains(action_map, full_path.str)) {
+            str_free(full_path);
+        } else {
+            pthread_mutex_lock(&map_mutex);
+            g_hash_table_insert(action_map, full_path.str, new_launcher(full_path));
+            pthread_mutex_unlock(&map_mutex);
         }
     }
     closedir(dir);
 }
 
-static void add_launchers_from_commands(void)
+static void update_commands()
 {
+    struct stat st = {0};
+    if (!stat(commands_file, &st) && st.st_mtime == commands_file_time)
+        return;
+
+    GHashTableIter iter = {0};
+    gpointer key = NULL, value = NULL;
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        Action* a = value;
+        if (a->action == command_action)
+            a->used = false;
+    }
+
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-    gchar** groups = g_key_file_get_groups(kf, NULL);
-    for (size_t i = 0; groups[i]; i++) {
-        Launch launch = {
-            STR_I("!command"), // mark as command
-            str_new(groups[i]),
-            str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL)),
-            str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL))
-        };
-        add_launcher(launch);
+    char** groups = g_key_file_get_groups(kf, NULL);
+    for (unsigned i = 0; groups[i]; i++) {
+        String key = str_concat(STR_S("!cmd:"), str_wrap(groups[i]));
+        Action* a = g_hash_table_lookup(action_map, key.str);
+        if (a) {
+            str_free(a->exec);
+            str_free(a->icon);
+            str_free(key);
+        } else {
+            a = calloc(1, sizeof(Action));
+            a->action = command_action;
+            a->name = str_new(groups[i]);
+            a->key = key;
+            pthread_mutex_lock(&map_mutex);
+            g_hash_table_insert(action_map, key.str, a);
+            pthread_mutex_unlock(&map_mutex);
+        }
+        a->exec = str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL));
+        a->icon = str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL));
+        a->used = true;
     }
     g_strfreev(groups);
     g_key_file_free(kf);
 }
 
-static void update_launch_list(void)
+static void* update_actions(void* user_data)
 {
-    clear_launch_list();
-    add_launchers_from_dir(str_wrap(user_app_dir));
-    add_launchers_from_dir(STR_S(APPLICATIONS_DIR_1));
-    add_launchers_from_dir(STR_S(APPLICATIONS_DIR_0));
-    add_launchers_from_commands();
+    update_commands();
+    g_hash_table_foreach(action_map, update_launcher, NULL);
+    add_launchers(STR_S(APPLICATIONS_DIR_0));
+    add_launchers(STR_S(APPLICATIONS_DIR_1));
+    add_launchers(STR_S(USER_APPLICATIONS_DIR));
+    return NULL;
 }
 
 //------------------------------------------
-// action functions
+// filter functions
 
-static void add_action(Action* action)
+static void filter_scrore_add(gpointer key, gpointer value, gpointer user_data)
 {
-    if (action_list_size + 1 > action_list_capacity) {
-        action_list_capacity += INITIAL_LAUNCH_LIST_CAPACITY;
-        action_list = realloc(action_list, action_list_capacity * sizeof(Action));
-    }
-    action_list[action_list_size] = *action;
-    action_list_size++;
-}
+    Action* a = value;
+    String filter = *(String*)user_data;
+    if (!a->used)
+        return;
 
-static void clear_action_list(void)
-{
-    for (uint32_t i = 0; i < action_list_size; i++)
-        str_free(action_list[i].short_key);
-    action_list_size = 0;
-}
+    a->score = -1;
+    if (str_starts_with(a->mnemonic, filter))
+        a->score = 100000;
 
-static void update_action_list(void)
-{
-    clear_action_list();
-    for (size_t i = 0; i < launch_list_size; i++) {
-        Launch* l = launch_list + i;
-        String keyword = str_duplicate(l->name);
-        str_to_lower(keyword);
-        Action action = {
-            l->name,        // name
-            l->executable,  // hidden_key
-            STR_S(""),      // short_key
-            l->icon_name,   // icon_name
-            0,              // score
-            0,              // time
-            l,              // data
-            launch_action   // action
-        };
-        add_action(&action);
-    }
-    for (size_t i = 0; i < NUM_ACTIONS; i++)
-        add_action(actions + i);
-}
-
-// calculates a score that determines in which order the results are displayed
-static void update_action_score(Action* action, String filter)
-{
-    int score = -1;
-    if (str_starts_with(action->short_key, filter)) {
-        score = 100000;
-    }
-
-    if (score < 0) {
-        uint32_t pos = str_find_first_i(action->name, filter);
+    if (a->score < 0) {
+        unsigned pos = str_find_first_i(a->name, filter);
         if (pos != STR_END)
-            score = 100 + (filter.len - pos);
+            a->score = 100 + (filter.len - pos);
     }
 
-    if (score < 0) {
-        uint32_t pos = str_find_first_i(action->hidden_key, filter);
+    if (a->score < 0) {
+        unsigned pos = str_find_first_i(a->exec, filter);
         if (pos != STR_END)
-            score = 1 + (filter.len - pos);
+            a->score = 1 + (filter.len - pos);
     }
-    action->score = score;
+    if (a->score > 0)
+        g_array_append_val(filter_list, a);
 }
 
-inline static int cmp_action_score(const void* a, const void* b)
+static int compare_score(gconstpointer a, gconstpointer b)
 {
-    Action* a1 = *((Action**)a);
-    Action* a2 = *((Action**)b);
+    Action* a1 = *(Action**)a;
+    Action* a2 = *(Action**)b;
     return (a2->score - a1->score) + (a2->time < a1->time ? -1 : 1);
 }
 
@@ -347,39 +319,23 @@ static void filter_action_list(String filter)
 {
     if (filter.len == 0)
         return;
-    g_static_mutex_lock(&lists_mutex);
-
-    if (filter_list_capacity < action_list_capacity) {
-        filter_list_capacity = action_list_capacity;
-        filter_list = realloc(filter_list, filter_list_capacity * sizeof(Action*));
-    }
-
-    filter_list_size = 0;
-    for (size_t i = 0; i < action_list_size; i++) {
-        update_action_score(action_list + i, filter);
-        if (action_list[i].score > 0)
-            filter_list[filter_list_size++] = action_list + i;
-    }
-
-    qsort(filter_list, filter_list_size, sizeof(Action*), cmp_action_score);
-    g_static_mutex_unlock(&lists_mutex);
+    g_array_remove_range(filter_list, 0, filter_list->len);
+    g_hash_table_foreach(action_map, filter_scrore_add, &filter);
+    g_array_sort(filter_list, compare_score);
 }
 
 static void run_selected(void)
 {
-    g_static_mutex_lock(&lists_mutex);
-    // check in case async list update fails
-    if (filter_list_size > 0 && filter_list_choice < action_list_size) {
-        Action* action = filter_list[filter_list_choice];
-        if (action->action != 0) {
-            str_free(action->short_key);
-            action->short_key = str_duplicate(get_first_input_word());
-            action->time = time(NULL);
-            String str = str_wrap_n(input_string, input_string_size);
-            action->action(str, action);
-        }
+    if (filter_list->len > 0 && selection < filter_list->len) {
+        Action* a = g_array_index(filter_list, Action*, selection);
+        if (!a->action != 0)
+            return;
+        str_free(a->mnemonic);
+        a->mnemonic = str_duplicate(get_first_input_word());
+        a->time = time(NULL);
+        String str = str_wrap_n(input_string, input_string_size);
+        a->action(str, a);
     }
-    g_static_mutex_unlock(&lists_mutex);
 }
 
 //------------------------------------------
@@ -387,20 +343,21 @@ static void run_selected(void)
 
 static void image_set_icon(GtkImage* img, const char* name)
 {
-    if (prefs.show_icon) {
-        GIcon* icon = NULL;
-        if (g_path_is_absolute(name)) {
-            GFile* file = g_file_new_for_path(name);
-            icon = g_file_icon_new(file);
-            g_object_unref(file);
-        } else {
-            icon = g_themed_icon_new(name);
-        }
-        gtk_image_set_from_gicon(img, icon, ICON_SIZE);
-        g_object_unref(icon);
-    } else {
+    if (!pref_show_icon) {
         gtk_image_clear(img);
+        return;
     }
+
+    GIcon* icon = NULL;
+    if (g_path_is_absolute(name)) {
+        GFile* file = g_file_new_for_path(name);
+        icon = g_file_icon_new(file);
+        g_object_unref(file);
+    } else {
+        icon = g_themed_icon_new(name);
+    }
+    gtk_image_set_from_gicon(img, icon, ICON_SIZE);
+    g_object_unref(icon);
 }
 
 static void show_selected(void)
@@ -408,15 +365,14 @@ static void show_selected(void)
     const char* action_text = NO_MATCH_MESSAGE;
     const char* icon_name = NO_MATCH_ICON;
 
-    g_static_mutex_lock(&lists_mutex);
     if (input_string_size == 0) {
         action_text = WELCOME_MESSAGE;
         icon_name = DEFAULT_ICON;
-    } else if (filter_list_size > 0 && filter_list_size <= action_list_size) {
-        action_text = filter_list[filter_list_choice]->name.str;
-        icon_name = filter_list[filter_list_choice]->icon_name.str;
+    } else if (filter_list->len > 0) {
+        Action* a = g_array_index(filter_list, Action*, selection);
+        action_text = a->name.str;
+        icon_name = a->icon.str;
     }
-    g_static_mutex_unlock(&lists_mutex);
 
     gtk_label_set_text(GTK_LABEL(input_label), input_string);
     gtk_label_set_text(GTK_LABEL(action_label), action_text);
@@ -438,7 +394,7 @@ static void handle_text_input(GdkEventKey* event)
 
     input_string[input_string_size] = 0;
     filter_action_list(get_first_input_word());
-    filter_list_choice = 0;
+    selection = 0;
 }
 
 static void hide_window(void)
@@ -448,20 +404,21 @@ static void hide_window(void)
 
     gdk_keyboard_ungrab(GDK_CURRENT_TIME);
 
-    if (prefs.one_time) // configured for one-time use
+    if (pref_one_time) // configured for one-time use
         gtk_main_quit();
 
     gtk_widget_hide(window);
     input_string[0] = 0;
-    input_string_size = 0;
-    filter_list_size = 0;
-    filter_list_choice = 0;
+    selection = 0;
 }
 
 static void show_window(void)
 {
     if (gtk_widget_get_visible(window))
         return;
+
+    pthread_t thread = 0;
+    pthread_create(&thread, NULL, update_actions, NULL);
 
     show_selected();
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
@@ -497,6 +454,7 @@ static gboolean delete_event(GtkWidget* widget, GdkEvent* event, gpointer data)
 
 static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer data)
 {
+    pthread_mutex_lock(&map_mutex);
     switch (event->keyval) {
     case GDK_Escape:
         hide_window();
@@ -507,24 +465,18 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         hide_window();
         break;
     case GDK_Up:
-        if (filter_list_size) {
-            filter_list_choice += (filter_list_size - 1);
-            filter_list_choice %= filter_list_size;
-        }
-        show_selected();
-        break;
     case GDK_Tab:
     case GDK_Down:
-        if (filter_list_size) {
-            filter_list_choice++;
-            filter_list_choice %= filter_list_size;
+        if (filter_list->len) {
+            selection += (event->keyval == GDK_Up) ? filter_list->len - 1 : 1;
+            selection %= filter_list->len;
         }
         show_selected();
         break;
     default:
         // the keybind-thingie doesn't work when the popup window
         // grabs the keyboard focus, it has to be caught like this
-        if ((event->state & prefs.hotkey_mod) && (event->keyval == prefs.hotkey_key)) {
+        if ((event->state & pref_hotkey_mod) && (event->keyval == pref_hotkey_key)) {
             hide_window();
         } else {
             handle_text_input(event);
@@ -532,6 +484,7 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         }
         break;
     }
+    pthread_mutex_unlock(&map_mutex);
     return true;
 }
 
@@ -540,10 +493,10 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     double r = 0, g = 0, b = 0;
     GdkColor color;
 
-    if (!strcasecmp(prefs.border_color, "default"))
+    if (!strcasecmp(pref_border_color, "default"))
         color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED];
     else
-        gdk_color_parse(prefs.border_color, &color);
+        gdk_color_parse(pref_border_color, &color);
 
     r = (double)color.red / 0xffff;
     g = (double)color.green / 0xffff;
@@ -558,7 +511,7 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 
     /* because we're drawing right at the edge of the window, we need to double
      * the border width to get the expected result */
-    cairo_set_line_width(cr, prefs.border_width * 2);
+    cairo_set_line_width(cr, pref_border_width * 2);
     cairo_stroke(cr);
     cairo_destroy(cr);
 
@@ -574,7 +527,7 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
     if (!f)
         return;
     gsize length = 0;
-    gchar* data = g_key_file_to_data(kf, &length, NULL);
+    char* data = g_key_file_to_data(kf, &length, NULL);
     fwrite(data, 1, length, f);
     g_free(data);
     fclose(f);
@@ -583,27 +536,26 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 #if !GLIB_CHECK_VERSION(2,26,0)
 static void g_key_file_set_uint64(GKeyFile* kf, const char* group, const char* key, uint64_t value)
 {
-    gchar* str_value = g_strdup_printf("%llu", (unsigned long long)value);
+    char* str_value = g_strdup_printf("%llu", (unsigned long long)value);
     g_key_file_set_string(kf, group, key, str_value);
     g_free(str_value);
 }
 
 static uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error)
 {
-    gchar* value = g_key_file_get_string(kf, group, key, error);
+    char* value = g_key_file_get_string(kf, group, key, error);
     return value ? g_ascii_strtoull(value, 0, 10) : 0;
 }
 #endif
 
 // macro for writing to keyfile
-#define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, prefs.var)
+#define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, pref_##var)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
     WRITE_PREF(string, "Bindings", "launch", hotkey);
     WRITE_PREF(boolean, "Matching", "executable", match_executable);
-    WRITE_PREF(integer, "Update", "interval", update_timeout);
     WRITE_PREF(boolean, "Icons", "show", show_icon);
     WRITE_PREF(string, "Border", "color", border_color);
     WRITE_PREF(integer, "Border", "width", border_width);
@@ -617,14 +569,16 @@ static void save_config(void)
 // macro for reading from keyfile, without overwriting default values
 #define READ_PREF(type, group, key, var)            \
     if (g_key_file_has_key(kf, group, key, NULL))   \
-        prefs.var = g_key_file_get_##type (kf, group, key, NULL)
+        pref_##var = g_key_file_get_##type (kf, group, key, NULL)
 static void read_config(void)
 {
+    struct stat st = {0};
+    if (!stat(config_file, &st) && st.st_mtime == config_file_time)
+        return;
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL)) {
         READ_PREF(string, "Bindings", "launch", hotkey);
         READ_PREF(boolean, "Matching", "executable", match_executable);
-        READ_PREF(integer, "Update", "interval", update_timeout);
         READ_PREF(boolean, "Icons", "show", show_icon);
         READ_PREF(string, "Border", "color", border_color);
         READ_PREF(integer, "Border", "width", border_width);
@@ -638,11 +592,13 @@ static void read_config(void)
 static void save_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
-    for (size_t i = 0; i < action_list_size; i++) {
-        Action* a = action_list + i;
-        if (a->short_key.len > 0) {
-            g_key_file_set_string(kf, a->name.str, "short_key", a->short_key.str);
-            g_key_file_set_uint64(kf, a->name.str, "time", (uint64_t)a->time);
+    GHashTableIter iter = {0};
+    gpointer key = NULL, value = NULL;
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        Action* a = value;
+        if (a->mnemonic.len > 0) {
+            g_key_file_set_string(kf, a->key.str, "mnemonic", a->mnemonic.str);
+            g_key_file_set_uint64(kf, a->key.str, "time", (uint64_t)a->time);
         }
     }
     key_file_save(kf, action_file);
@@ -653,13 +609,14 @@ void load_actions(void)
 {
     GKeyFile* kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL)) {
-        for (size_t i = 0; i < action_list_size; i++) {
-            Action* a = action_list + i;
-            if (g_key_file_has_group(kf, a->name.str)) {
-                char* s = g_key_file_get_string(kf, a->name.str, "short_key", NULL);
-                a->short_key = str_own(s);
-                a->time = (time_t)g_key_file_get_uint64(kf, a->name.str, "time", NULL);
-            }
+        char** groups = g_key_file_get_groups(kf, NULL);
+        for (unsigned i = 0; groups[i]; i++) {
+            Action* a = g_hash_table_lookup(action_map, groups[i]);
+            if (!a)
+                continue;
+            char* s = g_key_file_get_string(kf, groups[i], "mnemonic", NULL);
+            a->mnemonic = str_own(s);
+            a->time = (time_t)g_key_file_get_uint64(kf, groups[i], "time", NULL);
         }
     }
     g_key_file_free(kf);
@@ -680,20 +637,10 @@ static void init_config_files(void)
 //------------------------------------------
 // misc
 
-// does what it says, lists_mutex must be locked before calling
-static void reload_settings_and_actions(void)
-{
-    save_actions();
-    read_config();
-    update_launch_list();
-    update_action_list();
-    load_actions();
-}
-
 // opens file in an editor and returns immediately
 // the plan was that run_editor only returns after the editor exits.
 // that way I could reload the settings after changes have been made.
-// but xdg-open and friends return immediately so that plan was spoiled :(
+// but xdg-open and friends return immediately so that plan was foiled :(
 static void run_editor(const char* file)
 {
     if (!is_readable_file(file))
@@ -713,45 +660,29 @@ static void run_editor(const char* file)
 
 static void register_hotkey(void)
 {
-    if (prefs.one_time)
+    if (pref_one_time)
         return;
     keybinder_init();
-    if (keybinder_bind(prefs.hotkey, toggle_window, NULL)) {
-        gtk_accelerator_parse(prefs.hotkey, &prefs.hotkey_key, &prefs.hotkey_mod);
-        printf("hit %s to show window\n", prefs.hotkey);
+    if (keybinder_bind(pref_hotkey, toggle_window, NULL)) {
+        gtk_accelerator_parse(pref_hotkey, &pref_hotkey_key, &pref_hotkey_mod);
+        printf("hit %s to show window\n", pref_hotkey);
     } else {
         GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
                             GTK_MESSAGE_ERROR, GTK_BUTTONS_NONE,
-                            "Fehlstart can't use hotkey '%s'.", prefs.hotkey);
-        gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Quit", GTK_RESPONSE_REJECT, 
+                            "Fehlstart can't use hotkey '%s'.", pref_hotkey);
+        gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Quit", GTK_RESPONSE_REJECT,
                             "Quit and Edit Settings", GTK_RESPONSE_ACCEPT, NULL);
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
-            settings_action(STR_S(""), NULL); // launch editor
+            edit_settings_action(STR_S(""), NULL); // launch editor
         gtk_widget_destroy(dialog);
         exit(EXIT_FAILURE);
     }
 }
 
-// gets run periodically
-static gboolean update_lists_cb(void *data)
-{
-    if (g_static_mutex_trylock(&lists_mutex)) {
-        reload_settings_and_actions();
-        g_static_mutex_unlock(&lists_mutex);
-    }
-    return true;
-}
-
-static void run_updates(void)
-{
-    if (prefs.update_timeout && !prefs.one_time)
-        g_timeout_add_seconds(60 * prefs.update_timeout, update_lists_cb, NULL);
-}
-
 static void create_widgets(void)
 {
     window = gtk_window_new(GTK_WINDOW_POPUP);
-    gtk_widget_set_size_request(window, prefs.window_width, prefs.window_height);
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
 
     gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
@@ -815,35 +746,15 @@ static void parse_commandline(int argc, char** argv)
 {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--one-way")) {
-            prefs.one_time = true;
+            pref_one_time = true;
         } else if (!strcmp(argv[i], "--help")) {
-            printf("fehlstart 0.2.8 (c) 2012 maep\noptions:\n"\
+            printf("fehlstart 0.3.0 (c) 2012 maep\noptions:\n"\
                    "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         } else {
             printf("invalid option: %s\n", argv[i]);
         }
     }
-}
-
-static void run_launcher(String command, Launch* launch)
-{
-    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(launch->file.str);
-    if (info != 0)
-        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
-    g_object_unref(info);
-}
-
-static void run_command(String command, Launch* launch)
-{
-    // extract args from command
-    uint32_t sp = str_find_first(command, STR_S(" "));
-    String cmd = (sp == STR_END) ?
-                 str_duplicate(launch->executable) :
-                 str_concat(launch->executable, str_substring(command, sp, STR_END));
-    printf("%s\n", cmd.str);
-    if (system(cmd.str)) {}; // to shut up gcc
-    str_free(cmd);
 }
 
 //------------------------------------------
@@ -854,35 +765,40 @@ static void quit_action(String command, Action* action)
     gtk_main_quit();
 }
 
-static void update_action(String command, Action* action)
-{
-    // lists_mutex is locked when actions are called
-    reload_settings_and_actions();
-}
-
 static void launch_action(String command, Action* action)
 {
-    pid_t pid = fork();
-    if (pid != 0)
+    if (fork() != 0)
         return;
-
-    setsid(); // "detatch" from parent process
-    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
-    Launch* launch = action->data;
-    if (str_equals(launch->file, STR_S("!command")))
-        run_command(command, launch);
-    else
-        run_launcher(command, launch);
+    setsid();                   // "detatch" from parent process
+    signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
+    action->action(command, action);
+    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(action->key.str);
+    if (info != 0)
+        g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
+    g_object_unref(info);
     exit(EXIT_SUCCESS);
 }
 
-static void settings_action(String command, Action* action)
+static void command_action(String command, Action* action)
+{
+    if (fork() != 0)
+        return;
+    setsid();                   // "detatch" from parent process
+    signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
+    // treat everythin after first word as arguments
+    unsigned sp = str_find_first(command, STR_S(" "));
+    String cmd = str_concat(action->key, str_substring(command, sp, STR_END));
+    if (system(cmd.str)) {}; // shut up gcc warning
+    str_free(cmd);
+}
+
+static void edit_settings_action(String command, Action* action)
 {
     save_config();
     run_editor(config_file);
 }
 
-static void commands_action(String command, Action* action)
+static void edit_commands_action(String command, Action* action)
 {
     if (!is_readable_file(commands_file)) {
         FILE* f = fopen(commands_file, "w");
@@ -900,29 +816,29 @@ static void commands_action(String command, Action* action)
 
 int main (int argc, char** argv)
 {
-    g_thread_init(NULL);
-
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
-    g_thread_init(NULL);
 
     signal(SIGCHLD, SIG_IGN); // let kernel raep the children, mwhahaha
     g_chdir(get_home_dir());
     g_desktop_app_info_set_desktop_env(get_desktop_env());
     user_app_dir = g_build_filename(get_home_dir(), USER_APPLICATIONS_DIR, NULL);
+    action_map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, free_action);
+    filter_list = g_array_sized_new (false, true, sizeof(Action*), 250);
 
     init_config_files();
     read_config();
-    update_launch_list();
-    update_action_list();
+    add_action("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action);
+    add_action("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, edit_settings_action);
+    add_action("fehlstart actions", "commands", GTK_STOCK_EXECUTE, edit_commands_action);
+    update_actions(NULL);
     load_actions();
 
     create_widgets();
-    if (prefs.one_time) // one-time use
+    if (pref_one_time) // one-time use
         show_window();
-
-    register_hotkey();
-    run_updates();
+    else
+        register_hotkey();
 
     gtk_main();
     return EXIT_SUCCESS;
