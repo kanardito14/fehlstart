@@ -31,8 +31,8 @@
 #include "string.h"
 
 // macros
-#define WELCOME_MESSAGE     "type something"
-#define NO_MATCH_MESSAGE    "no match"
+#define WELCOME_MESSAGE     ""
+#define NO_MATCH_MESSAGE    ""
 #define APPLICATION_ICON    "applications-other"
 #define DEFAULT_HOTKEY      "<Super>space"
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
@@ -210,7 +210,6 @@ static void add_launchers(String dir_name)
     DIR* dir = opendir(dir_name.str);
     if (!dir)
         return;
-    printf("reading %s\n", dir_name.str);
     struct dirent* ent = NULL;
     while ((ent = readdir(dir))) {
         String file_name = str_wrap(ent->d_name);
@@ -231,11 +230,13 @@ static void add_launchers(String dir_name)
 static void update_commands()
 {
     struct stat st = {0};
-    if (!stat(commands_file, &st) && st.st_mtime == commands_file_time)
+    if (stat(commands_file, &st) && st.st_mtime == commands_file_time)
         return;
+    commands_file_time = st.st_mtime;
 
     GHashTableIter iter = {0};
     gpointer key = NULL, value = NULL;
+    g_hash_table_iter_init(&iter, action_map);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         Action* a = value;
         if (a->action == command_action)
@@ -319,23 +320,24 @@ static void filter_action_list(String filter)
 {
     if (filter.len == 0)
         return;
-    g_array_remove_range(filter_list, 0, filter_list->len);
+    if (filter_list->len)
+        g_array_remove_range(filter_list, 0, filter_list->len);
     g_hash_table_foreach(action_map, filter_scrore_add, &filter);
     g_array_sort(filter_list, compare_score);
 }
 
 static void run_selected(void)
 {
-    if (filter_list->len > 0 && selection < filter_list->len) {
-        Action* a = g_array_index(filter_list, Action*, selection);
-        if (!a->action != 0)
-            return;
-        str_free(a->mnemonic);
-        a->mnemonic = str_duplicate(get_first_input_word());
-        a->time = time(NULL);
-        String str = str_wrap_n(input_string, input_string_size);
-        a->action(str, a);
-    }
+    if (!filter_list->len || selection >= filter_list->len)
+        return;
+    Action* a = g_array_index(filter_list, Action*, selection);
+    if (!a->action != 0)
+        return;
+    str_free(a->mnemonic);
+    a->mnemonic = str_duplicate(get_first_input_word());
+    a->time = time(NULL);
+    String str = str_wrap_n(input_string, input_string_size);
+    a->action(str, a);
 }
 
 //------------------------------------------
@@ -409,6 +411,7 @@ static void hide_window(void)
 
     gtk_widget_hide(window);
     input_string[0] = 0;
+    input_string_size = 0;
     selection = 0;
 }
 
@@ -573,8 +576,10 @@ static void save_config(void)
 static void read_config(void)
 {
     struct stat st = {0};
-    if (!stat(config_file, &st) && st.st_mtime == config_file_time)
+    if (stat(config_file, &st) && st.st_mtime == config_file_time)
         return;
+    config_file_time = st.st_mtime;
+
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL)) {
         READ_PREF(string, "Bindings", "launch", hotkey);
@@ -594,6 +599,7 @@ static void save_actions(void)
     GKeyFile* kf = g_key_file_new();
     GHashTableIter iter = {0};
     gpointer key = NULL, value = NULL;
+    g_hash_table_iter_init(&iter, action_map);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
         Action* a = value;
         if (a->mnemonic.len > 0) {
@@ -771,7 +777,6 @@ static void launch_action(String command, Action* action)
         return;
     setsid();                   // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
-    action->action(command, action);
     GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(action->key.str);
     if (info != 0)
         g_app_info_launch(G_APP_INFO(info), NULL, NULL, NULL);
@@ -785,7 +790,7 @@ static void command_action(String command, Action* action)
         return;
     setsid();                   // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
-    // treat everythin after first word as arguments
+    // treat everything after first space as arguments
     unsigned sp = str_find_first(command, STR_S(" "));
     String cmd = str_concat(action->key, str_substring(command, sp, STR_END));
     if (system(cmd.str)) {}; // shut up gcc warning
@@ -814,7 +819,7 @@ static void edit_commands_action(String command, Action* action)
 //------------------------------------------
 // main
 
-int main (int argc, char** argv)
+int main(int argc, char** argv)
 {
     gtk_init(&argc, &argv);
     parse_commandline(argc, argv);
