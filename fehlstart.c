@@ -38,11 +38,19 @@
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
 #define DEFAULT_ICON        GTK_STOCK_FIND
 #define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
-#define INPUT_STRING_SIZE   0x80
+#define INPUT_STRING_SIZE   20
 #define SHOW_IGNORE_TIME    100000
+#define PI                  3.14159265359
 #define APPLICATIONS_DIR_0  "/usr/share/applications"
 #define APPLICATIONS_DIR_1  "/usr/local/share/applications"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
+
+typedef struct {
+    double r;
+    double g;
+    double b;
+    double a;
+} Color;
 
 typedef struct Action {
     String  key;                // map key, .desktop file
@@ -63,20 +71,22 @@ typedef struct Action {
 static void launch_action(String, Action*);
 static void command_action(String, Action*);
 static void edit_settings_action(String, Action*);
+static void* update_all(void* user_data);
 
 //------------------------------------------
 // global variables
 
 // preferences
-static char*    pref_hotkey = DEFAULT_HOTKEY;
-static unsigned pref_hotkey_key;
-static bool     pref_match_executable = true;
-static bool     pref_show_icon = true;
+static char*    pref_hotkey             = DEFAULT_HOTKEY;
+static bool     pref_match_executable   = true;
+static bool     pref_show_icon          = true;
 static bool     pref_one_time;
-static char*    pref_border_color = "default";
-static int      pref_border_width = 1;
-static int      pref_window_width = 200;
-static int      pref_window_height = 100;
+static char*    pref_border_color       = "default";
+static int      pref_border_width       = 2;
+static char*    pref_window_style       = "default";
+static int      pref_window_width       = 200;
+static int      pref_window_height      = 100;
+static unsigned pref_hotkey_key;
 static GdkModifierType pref_hotkey_mod;
 
 // launcher stuff
@@ -97,8 +107,6 @@ static GtkWidget*   input_label;
 static char*    config_file;
 static char*    action_file;
 static char*    commands_file;
-static time_t   config_file_time;
-static time_t   commands_file_time;
 static char*    user_app_dir;
 
 //------------------------------------------
@@ -229,6 +237,7 @@ static void add_launchers(String dir_name)
 
 static void update_commands()
 {
+    static time_t commands_file_time;
     struct stat st = {0};
     if (stat(commands_file, &st) && st.st_mtime == commands_file_time)
         return;
@@ -268,16 +277,6 @@ static void update_commands()
     }
     g_strfreev(groups);
     g_key_file_free(kf);
-}
-
-static void* update_actions(void* user_data)
-{
-    update_commands();
-    g_hash_table_foreach(action_map, update_launcher, NULL);
-    add_launchers(STR_S(APPLICATIONS_DIR_0));
-    add_launchers(STR_S(APPLICATIONS_DIR_1));
-    add_launchers(STR_S(USER_APPLICATIONS_DIR));
-    return NULL;
 }
 
 //------------------------------------------
@@ -421,7 +420,7 @@ static void show_window(void)
         return;
 
     pthread_t thread = 0;
-    pthread_create(&thread, NULL, update_actions, NULL);
+    pthread_create(&thread, NULL, update_all, NULL);
 
     show_selected();
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
@@ -491,34 +490,102 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
     return true;
 }
 
+static void screen_changed(GtkWidget *widget, GdkScreen *old_screen, gpointer userdata)
+{
+    GdkScreen *screen = gtk_widget_get_screen(widget);
+    GdkColormap *colormap = gdk_screen_get_rgba_colormap(screen);
+    if (!colormap)
+        colormap = gdk_screen_get_rgb_colormap(screen);
+    gtk_widget_set_colormap(widget, colormap);
+}
+
+static void round_rect(cairo_t* cr, double x, double y, double w, double h, double r)
+{
+    cairo_arc(cr, x + w - r, y + r, r, 1.5 * PI, 0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, 0.5 * PI);
+    cairo_arc(cr, x + r, y + h - r, r, 0.5 * PI, PI);
+    cairo_arc(cr, x + r, y + r, r, PI, 1.5 * PI);
+    cairo_close_path(cr);
+}
+static Color parse_color(const char* color_name, int default_color)
+{
+    GdkColor c = {0};
+    if (!strcasecmp(color_name, "default"))
+        c = gtk_widget_get_style(window)->bg[default_color];
+    else
+        gdk_color_parse(pref_border_color, &c);
+    Color col = {(double)c.red / 0xffff, (double)c.green / 0xffff, (double)c.blue / 0xffff, 1};
+    return col;
+}
+
 static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
-    double r = 0, g = 0, b = 0;
-    GdkColor color;
-
-    if (!strcasecmp(pref_border_color, "default"))
-        color = gtk_widget_get_style(window)->bg[GTK_STATE_SELECTED];
-    else
-        gdk_color_parse(pref_border_color, &color);
-
-    r = (double)color.red / 0xffff;
-    g = (double)color.green / 0xffff;
-    b = (double)color.blue / 0xffff;
-
-    int width = 0, height = 0;
-    gtk_window_get_size(GTK_WINDOW(window), &width, &height);
+    double w = pref_window_width, h = pref_window_height;
+    double bw = pref_border_width;
+    Color c0 = parse_color(pref_border_color, GTK_STATE_NORMAL);
+    Color c1 = parse_color(pref_border_color, GTK_STATE_SELECTED);
 
     cairo_t* cr = gdk_cairo_create(widget->window);
-    cairo_set_source_rgb(cr, r, g, b);
-    cairo_rectangle(cr, 0, 0, width, height);
+    if (!strcasecmp(pref_window_style, "gtk")) {
+        cairo_rectangle(cr, bw / 2, bw / 2, w - bw, h - bw);
+        cairo_set_line_width(cr, bw);
+        cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
+        cairo_stroke(cr);
+    } else {
+        cairo_set_source_rgba (cr, 0, 0, 0, 0);
+        cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
+        cairo_paint (cr);
 
-    /* because we're drawing right at the edge of the window, we need to double
-     * the border width to get the expected result */
-    cairo_set_line_width(cr, pref_border_width * 2);
-    cairo_stroke(cr);
+        cairo_pattern_t* pat = cairo_pattern_create_linear(0, 0, 0, h);
+        cairo_pattern_add_color_stop_rgb(pat, 0, c1.r, c1.g, c1.b);
+        cairo_pattern_add_color_stop_rgb(pat, 1, c0.r, c0.g, c0.b);
+        round_rect(cr, 0, 0, w, h, 20);
+        cairo_clip(cr);
+        cairo_set_source (cr, pat);
+        cairo_paint(cr);
+        cairo_pattern_destroy(pat);
+
+        round_rect(cr, bw / 2, bw / 2, w - bw, h - bw, 20);
+        cairo_set_line_width(cr, bw);
+        cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
+        cairo_stroke(cr);
+    }
     cairo_destroy(cr);
-
     return false;
+}
+
+static void create_widgets(void)
+{
+    window = gtk_window_new(GTK_WINDOW_POPUP);
+    gtk_widget_set_app_paintable(window, true);
+    gtk_window_set_resizable(GTK_WINDOW(window), false);
+
+    gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
+    g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), NULL);
+    g_signal_connect(window, "destroy", G_CALLBACK(destroy), NULL);
+    g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), NULL);
+    g_signal_connect(window, "button-press-event", G_CALLBACK(button_press_event), NULL);
+    g_signal_connect(window, "expose-event", G_CALLBACK(expose_event), NULL);
+    g_signal_connect(window, "screen-changed", G_CALLBACK(screen_changed), NULL);
+
+    GtkWidget* vbox = gtk_vbox_new(false, 5);
+    gtk_container_add(GTK_CONTAINER(window), vbox);
+    gtk_widget_show(vbox);
+
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
+
+    image = gtk_image_new();
+    gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
+    gtk_widget_show(image);
+
+    action_label = gtk_label_new(WELCOME_MESSAGE);
+    gtk_box_pack_start(GTK_BOX(vbox), action_label, true, true, 0);
+    gtk_widget_show(action_label);
+
+    input_label = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
+    gtk_widget_show(input_label);
+    screen_changed(window, NULL, NULL);
 }
 
 //------------------------------------------
@@ -562,6 +629,7 @@ static void save_config(void)
     WRITE_PREF(boolean, "Icons", "show", show_icon);
     WRITE_PREF(string, "Border", "color", border_color);
     WRITE_PREF(integer, "Border", "width", border_width);
+    WRITE_PREF(string, "Window", "style", window_style);
     WRITE_PREF(integer, "Window", "width", window_width);
     WRITE_PREF(integer, "Window", "height", window_height);
     key_file_save(kf, config_file);
@@ -575,6 +643,7 @@ static void save_config(void)
         pref_##var = g_key_file_get_##type (kf, group, key, NULL)
 static void read_config(void)
 {
+    static time_t config_file_time;
     struct stat st = {0};
     if (stat(config_file, &st) && st.st_mtime == config_file_time)
         return;
@@ -587,6 +656,7 @@ static void read_config(void)
         READ_PREF(boolean, "Icons", "show", show_icon);
         READ_PREF(string, "Border", "color", border_color);
         READ_PREF(integer, "Border", "width", border_width);
+        READ_PREF(string, "Window", "style", window_style);
         READ_PREF(integer, "Window", "width", window_width);
         READ_PREF(integer, "Window", "height", window_height);
     }
@@ -594,7 +664,7 @@ static void read_config(void)
 }
 #undef READ_PREF
 
-static void save_actions(void)
+static void save_mnemonics(void)
 {
     GKeyFile* kf = g_key_file_new();
     GHashTableIter iter = {0};
@@ -611,7 +681,7 @@ static void save_actions(void)
     g_key_file_free(kf);
 }
 
-void load_actions(void)
+void load_mnemonics(void)
 {
     GKeyFile* kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL)) {
@@ -637,11 +707,22 @@ static void init_config_files(void)
     commands_file = g_build_filename(dir, "commands.rc", NULL);
     g_free(dir);
     atexit(save_config);
-    atexit(save_actions);
+    atexit(save_mnemonics);
 }
 
 //------------------------------------------
 // misc
+
+static void* update_all(void* user_data)
+{
+    read_config();
+    update_commands();
+    g_hash_table_foreach(action_map, update_launcher, NULL);
+    add_launchers(STR_S(APPLICATIONS_DIR_0));
+    add_launchers(STR_S(APPLICATIONS_DIR_1));
+    add_launchers(STR_S(USER_APPLICATIONS_DIR));
+    return NULL;
+}
 
 // opens file in an editor and returns immediately
 // the plan was that run_editor only returns after the editor exits.
@@ -651,7 +732,6 @@ static void run_editor(const char* file)
 {
     if (!is_readable_file(file))
         return;
-
     pid_t pid = fork();
     if (pid != 0)
         return;
@@ -673,46 +753,15 @@ static void register_hotkey(void)
         gtk_accelerator_parse(pref_hotkey, &pref_hotkey_key, &pref_hotkey_mod);
         printf("hit %s to show window\n", pref_hotkey);
     } else {
-        GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT,
-                            GTK_MESSAGE_ERROR, GTK_BUTTONS_NONE,
-                            "Fehlstart can't use hotkey '%s'.", pref_hotkey);
-        gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Quit", GTK_RESPONSE_REJECT,
-                            "Quit and Edit Settings", GTK_RESPONSE_ACCEPT, NULL);
+        GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
+            GTK_BUTTONS_NONE, "Hotkey '%s' is already being used!", pref_hotkey);
+        gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Edit Settings", GTK_RESPONSE_ACCEPT,
+            "Cancel", GTK_RESPONSE_REJECT, NULL);
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
             edit_settings_action(STR_S(""), NULL); // launch editor
         gtk_widget_destroy(dialog);
         exit(EXIT_FAILURE);
     }
-}
-
-static void create_widgets(void)
-{
-    window = gtk_window_new(GTK_WINDOW_POPUP);
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
-    gtk_window_set_resizable(GTK_WINDOW(window), false);
-
-    gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
-    g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), 0);
-    g_signal_connect(window, "destroy", G_CALLBACK(destroy), 0);
-    g_signal_connect(window, "key-press-event", G_CALLBACK(key_press_event), 0);
-    g_signal_connect(window, "button-press-event", G_CALLBACK(button_press_event), 0);
-
-    GtkWidget* vbox = gtk_vbox_new(false, 5);
-    gtk_container_add(GTK_CONTAINER(window), vbox);
-    g_signal_connect(vbox, "expose-event", G_CALLBACK(expose_event), 0);
-    gtk_widget_show(vbox);
-
-    image = gtk_image_new();
-    gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
-    gtk_widget_show(image);
-
-    action_label = gtk_label_new(WELCOME_MESSAGE);
-    gtk_box_pack_start(GTK_BOX(vbox), action_label, true, true, 0);
-    gtk_widget_show(action_label);
-
-    input_label = gtk_label_new("");
-    gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
-    gtk_widget_show(input_label);
 }
 
 // strcasestr it a gnu extension, b must be a static cstring
@@ -731,6 +780,7 @@ static const char* get_desktop_env(void)
     xdg_prefix = xdg_prefix ? xdg_prefix : "";
     current_desktop = current_desktop ? current_desktop : "";
 
+    // see http://standards.freedesktop.org/menu-spec/latest/apb.html
     const char* desktop = "Old";
     if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
@@ -740,9 +790,9 @@ static const char* get_desktop_env(void)
         desktop = "XFCE";
     else if (CONTAINS(session, "lxde") || CONTAINS(current_desktop, "lxde"))
         desktop = "LXDE";
-    else if (CONTAINS(session, "rox"))
+    else if (CONTAINS(session, "rox")) // verify
         desktop = "ROX";
-
+    // TODO: add MATE, Razor, TDE, Unity
     printf("detected desktop: %s\n", desktop);
     return desktop;
 }
@@ -790,10 +840,9 @@ static void command_action(String command, Action* action)
         return;
     setsid();                   // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
-    // treat everything after first space as arguments
-    unsigned sp = str_find_first(command, STR_S(" "));
+    unsigned sp = str_find_first(command, STR_S(" ")); // everything after first space is arguments
     String cmd = str_concat(action->key, str_substring(command, sp, STR_END));
-    if (system(cmd.str)) {}; // shut up gcc warning
+    if (system(cmd.str)) {};    // shut up gcc warning
     str_free(cmd);
 }
 
@@ -810,7 +859,7 @@ static void edit_commands_action(String command, Action* action)
         if (!f)
             return;
         fputs("#example: run a command in xterm\n#'run top' will start top in xterm\n"\
-              "#[Run in Terminal]\n#Exec=xterm -e\n#Icon=terminal\n", f);
+              "#[Run in Terminal]\n#Exec=xterm -e #args are put here\n#Icon=terminal\n", f);
         fclose(f);
     }
     run_editor(commands_file);
@@ -831,13 +880,13 @@ int main(int argc, char** argv)
     action_map = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, free_action);
     filter_list = g_array_sized_new (false, true, sizeof(Action*), 250);
 
-    init_config_files();
-    read_config();
     add_action("quit fehlstart", "exit", GTK_STOCK_QUIT, quit_action);
     add_action("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, edit_settings_action);
     add_action("fehlstart actions", "commands", GTK_STOCK_EXECUTE, edit_commands_action);
-    update_actions(NULL);
-    load_actions();
+
+    init_config_files();
+    update_all(NULL); // read config and launchers
+    load_mnemonics();
 
     create_widgets();
     if (pref_one_time) // one-time use
