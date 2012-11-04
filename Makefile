@@ -3,7 +3,7 @@ INSTALLDIR := $(DESTDIR)$(PREFIX)
 
 CC = gcc
 
-PKGS = keybinder gio-unix-2.0 gthread-2.0
+PKGS = keybinder gio-unix-2.0
 INCS = $(shell pkg-config --cflags $(PKGS))
 LIBS = $(shell pkg-config --libs $(PKGS))
 

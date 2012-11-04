@@ -552,7 +552,7 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
         double crad = sqrt(w2 * w2 + h3 * h3);
         cairo_move_to(cr, 0, 0);
         cairo_line_to(cr, w, 0);
-        // TODO: properly calculate angles
+        // TODO: properly calculate angles (asin/acos)
         cairo_arc_negative(cr, w2, h * 0.6 + h3, crad, -0.10 * PI, -0.80 * PI);
         cairo_close_path(cr);
 
