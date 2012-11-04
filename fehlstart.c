@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 
 #include <strings.h>
@@ -111,6 +112,8 @@ static char*    user_app_dir;
 
 //------------------------------------------
 // helper functions
+
+inline static int irange(int v, int min, int max) { return v < min ? min : v > max ? max : v; }
 
 static bool is_readable_file(const char* file)
 {
@@ -476,14 +479,13 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         show_selected();
         break;
     default:
-        // the keybind-thingie doesn't work when the popup window
-        // grabs the keyboard focus, it has to be caught like this
+        // the hotkey doesn't work when the popup window grabs the keyboard focus, it has to be caught manually
         if ((event->state & pref_hotkey_mod) && (event->keyval == pref_hotkey_key)) {
             hide_window();
-        } else {
-            handle_text_input(event);
-            show_selected();
+            break;
         }
+        handle_text_input(event);
+        show_selected();
         break;
     }
     pthread_mutex_unlock(&map_mutex);
@@ -526,28 +528,39 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     Color c1 = parse_color(pref_border_color, GTK_STATE_SELECTED);
 
     cairo_t* cr = gdk_cairo_create(widget->window);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
     if (!strcasecmp(pref_window_style, "gtk")) {
+        cairo_set_source_rgb(cr, c0.r, c0.g, c0.b);
+        cairo_fill(cr);
         cairo_rectangle(cr, bw / 2, bw / 2, w - bw, h - bw);
         cairo_set_line_width(cr, bw);
         cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
         cairo_stroke(cr);
     } else {
-        cairo_set_source_rgba (cr, 0, 0, 0, 0);
-        cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
-        cairo_paint (cr);
-
-        cairo_pattern_t* pat = cairo_pattern_create_linear(0, 0, 0, h);
-        cairo_pattern_add_color_stop_rgb(pat, 0, c1.r, c1.g, c1.b);
-        cairo_pattern_add_color_stop_rgb(pat, 1, c0.r, c0.g, c0.b);
-        round_rect(cr, 0, 0, w, h, 20);
+        double brad = fmax(w, h) / 10; // border radius
+        round_rect(cr, 0, 0, w, h, brad);
         cairo_clip(cr);
-        cairo_set_source (cr, pat);
-        cairo_paint(cr);
-        cairo_pattern_destroy(pat);
 
-        round_rect(cr, bw / 2, bw / 2, w - bw, h - bw, 20);
-        cairo_set_line_width(cr, bw);
         cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
+        cairo_paint(cr);
+
+        double w2 = w / 2, h3 = h * 4;
+        double crad = sqrt(w2 * w2 + h3 * h3);
+        cairo_move_to(cr, 0, 0);
+        cairo_line_to(cr, w, 0);
+        cairo_arc_negative(cr, w2, h * 0.6 + h3, crad, -0.10 * PI, -0.80 * PI);
+        cairo_close_path(cr);
+
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.2);
+        cairo_fill(cr);
+
+        round_rect(cr, 0, 0, w, h, brad);
+        cairo_set_line_width(cr, bw * 2);
+        cairo_set_source_rgba(cr, 1, 1, 1, 0.5);
         cairo_stroke(cr);
     }
     cairo_destroy(cr);
@@ -661,6 +674,10 @@ static void read_config(void)
         READ_PREF(integer, "Window", "height", window_height);
     }
     g_key_file_free(kf);
+    // some sanity checks
+    pref_border_width = irange(pref_border_width, 0, 20);
+    pref_window_width = irange(pref_window_width, 200, 800);
+    pref_window_height = irange(pref_window_height, 100, 800);
 }
 #undef READ_PREF
 
