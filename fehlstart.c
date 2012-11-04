@@ -535,7 +535,7 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 
     if (!strcasecmp(pref_window_style, "gtk")) {
         cairo_set_source_rgb(cr, c0.r, c0.g, c0.b);
-        cairo_fill(cr);
+        cairo_paint(cr);
         cairo_rectangle(cr, bw / 2, bw / 2, w - bw, h - bw);
         cairo_set_line_width(cr, bw);
         cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
