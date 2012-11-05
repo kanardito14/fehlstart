@@ -192,7 +192,7 @@ static void reload_launcher (Action* action)
     str_free(action->name);
     str_free(action->exec);
     str_free(action->icon);
-    action->used = false;
+    action->    used = false;
     load_launcher(action->key, action);
 }
 
@@ -526,6 +526,7 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     double bw = pref_border_width;
     Color c0 = parse_color(pref_border_color, GTK_STATE_NORMAL);
     Color c1 = parse_color(pref_border_color, GTK_STATE_SELECTED);
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
@@ -573,6 +574,7 @@ static void create_widgets(void)
     window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_app_paintable(window, true);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
     g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), NULL);
@@ -585,8 +587,6 @@ static void create_widgets(void)
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
     gtk_widget_show(vbox);
-
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     image = gtk_image_new();
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
