@@ -515,7 +515,7 @@ static Color parse_color(const char* color_name, int default_color)
     if (!strcasecmp(color_name, "default"))
         c = gtk_widget_get_style(window)->bg[default_color];
     else
-        gdk_color_parse(pref_border_color, &c);
+        gdk_color_parse(color_name, &c);
     Color col = {(double)c.red / 0xffff, (double)c.green / 0xffff, (double)c.blue / 0xffff, 1};
     return col;
 }
