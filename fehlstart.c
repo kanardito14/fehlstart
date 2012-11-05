@@ -19,6 +19,7 @@
 #include <dirent.h>
 #include <signal.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -139,6 +140,28 @@ static String get_first_input_word(void)
     return str_wrap_n(input_string, input_string_size);
 }
 
+#if !GLIB_CHECK_VERSION(2,32,0)
+static bool g_hash_table_contains(GHashTable* hash_table, gconstpointer key)
+{
+    return g_hash_table_lookup_extended(hash_table, key, NULL, NULL);
+}
+#endif
+
+#if !GLIB_CHECK_VERSION(2,26,0)
+static void g_key_file_set_uint64(GKeyFile* kf, const char* group, const char* key, uint64_t value)
+{
+    char* str_value = g_strdup_printf("%llu", (unsigned long long)value);
+    g_key_file_set_string(kf, group, key, str_value);
+    g_free(str_value);
+}
+
+static uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error)
+{
+    char* value = g_key_file_get_string(kf, group, key, error);
+    return value ? g_ascii_strtoull(value, 0, 10) : 0;
+}
+#endif
+
 //------------------------------------------
 // action functions
 
@@ -167,7 +190,7 @@ static void free_action(gpointer data)
 
 static void load_launcher(String file, Action* action)
 {
-    struct stat st = {0};
+    struct stat st;
     stat(file.str, &st);
     action->file_time = st.st_mtime;
     action->action = launch_action;
@@ -192,7 +215,7 @@ static void reload_launcher (Action* action)
     str_free(action->name);
     str_free(action->exec);
     str_free(action->icon);
-    action->    used = false;
+    action->used = false;
     load_launcher(action->key, action);
 }
 
@@ -207,7 +230,7 @@ static Action* new_launcher(String file)
 static void update_launcher(gpointer key, gpointer value, gpointer user_data)
 {
     Action* a = value;
-    struct stat st = {0};
+    struct stat st;
     if (a->action != launch_action)
         return;
     if (stat(a->key.str, &st))
@@ -241,12 +264,12 @@ static void add_launchers(String dir_name)
 static void update_commands()
 {
     static time_t commands_file_time;
-    struct stat st = {0};
+    struct stat st;
     if (stat(commands_file, &st) && st.st_mtime == commands_file_time)
         return;
     commands_file_time = st.st_mtime;
 
-    GHashTableIter iter = {0};
+    GHashTableIter iter;
     gpointer key = NULL, value = NULL;
     g_hash_table_iter_init(&iter, action_map);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
@@ -511,11 +534,11 @@ static void round_rect(cairo_t* cr, double x, double y, double w, double h, doub
 }
 static Color parse_color(const char* color_name, int default_color)
 {
-    GdkColor c = {0};
+    GdkColor c = {0, 0, 0, 0};
     if (!strcasecmp(color_name, "default"))
         c = gtk_widget_get_style(window)->bg[default_color];
     else
-        gdk_color_parse(color_name, &c);
+        gdk_color_parse(pref_border_color, &c);
     Color col = {(double)c.red / 0xffff, (double)c.green / 0xffff, (double)c.blue / 0xffff, 1};
     return col;
 }
@@ -526,7 +549,6 @@ static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
     double bw = pref_border_width;
     Color c0 = parse_color(pref_border_color, GTK_STATE_NORMAL);
     Color c1 = parse_color(pref_border_color, GTK_STATE_SELECTED);
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
@@ -574,7 +596,6 @@ static void create_widgets(void)
     window = gtk_window_new(GTK_WINDOW_POPUP);
     gtk_widget_set_app_paintable(window, true);
     gtk_window_set_resizable(GTK_WINDOW(window), false);
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     gtk_widget_add_events(window, GDK_KEY_PRESS_MASK | GDK_BUTTON_PRESS_MASK);
     g_signal_connect(window, "delete-event", G_CALLBACK(delete_event), NULL);
@@ -587,6 +608,8 @@ static void create_widgets(void)
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
     gtk_widget_show(vbox);
+
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     image = gtk_image_new();
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
@@ -617,21 +640,6 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
     fclose(f);
 }
 
-#if !GLIB_CHECK_VERSION(2,26,0)
-static void g_key_file_set_uint64(GKeyFile* kf, const char* group, const char* key, uint64_t value)
-{
-    char* str_value = g_strdup_printf("%llu", (unsigned long long)value);
-    g_key_file_set_string(kf, group, key, str_value);
-    g_free(str_value);
-}
-
-static uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error)
-{
-    char* value = g_key_file_get_string(kf, group, key, error);
-    return value ? g_ascii_strtoull(value, 0, 10) : 0;
-}
-#endif
-
 // macro for writing to keyfile
 #define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, pref_##var)
 static void save_config(void)
@@ -658,7 +666,7 @@ static void save_config(void)
 static void read_config(void)
 {
     static time_t config_file_time;
-    struct stat st = {0};
+    struct stat st;
     if (stat(config_file, &st) && st.st_mtime == config_file_time)
         return;
     config_file_time = st.st_mtime;
@@ -685,7 +693,7 @@ static void read_config(void)
 static void save_mnemonics(void)
 {
     GKeyFile* kf = g_key_file_new();
-    GHashTableIter iter = {0};
+    GHashTableIter iter;
     gpointer key = NULL, value = NULL;
     g_hash_table_iter_init(&iter, action_map);
     while (g_hash_table_iter_next(&iter, &key, &value)) {
