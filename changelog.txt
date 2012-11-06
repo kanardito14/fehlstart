@@ -1,0 +1,10 @@
+0.3.0
+ * updated gui
+ * complete internal overhaul
+ * instant updates (timeout setting obsolete)
+ * new setting
+   style: default, gtk
+ * many new bugs :D
+
+0.2.x
+ * here be dragons
