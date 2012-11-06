@@ -33,8 +33,8 @@
 #include "string.h"
 
 // macros
-#define WELCOME_MESSAGE     ""
-#define NO_MATCH_MESSAGE    ""
+#define WELCOME_MESSAGE     "..."
+#define NO_MATCH_MESSAGE    "???"
 #define APPLICATION_ICON    "applications-other"
 #define DEFAULT_HOTKEY      "<Super>space"
 #define ICON_SIZE           GTK_ICON_SIZE_DIALOG
@@ -374,17 +374,23 @@ static void image_set_icon(GtkImage* img, const char* name)
         gtk_image_clear(img);
         return;
     }
-
-    GIcon* icon = NULL;
+    int h = pref_window_height / 2;
+    GdkPixbuf* pb = NULL;
+    puts(name);
     if (g_path_is_absolute(name)) {
-        GFile* file = g_file_new_for_path(name);
-        icon = g_file_icon_new(file);
-        g_object_unref(file);
+        pb = gdk_pixbuf_new_from_file_at_scale(name, -1, h, true, NULL);
     } else {
-        icon = g_themed_icon_new(name);
+        int flags = GTK_ICON_LOOKUP_FORCE_SIZE | GTK_ICON_LOOKUP_USE_BUILTIN;
+        GtkIconTheme* theme = gtk_icon_theme_get_default();
+        pb = gtk_icon_theme_load_icon(theme, name, h, flags, NULL);
     }
-    gtk_image_set_from_gicon(img, icon, ICON_SIZE);
-    g_object_unref(icon);
+    if (pb) {
+        gtk_image_set_from_pixbuf(img, pb);
+        g_object_unref(pb);
+    } else {
+        // TODO: show error icon
+        gtk_image_clear(img);
+    }
 }
 
 static void show_selected(void)
@@ -447,8 +453,8 @@ static void show_window(void)
 
     pthread_t thread = 0;
     pthread_create(&thread, NULL, update_all, NULL);
-
     show_selected();
+    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
     gtk_window_present(GTK_WINDOW(window));
     gtk_window_set_keep_above(GTK_WINDOW(window), true);
@@ -608,8 +614,6 @@ static void create_widgets(void)
     GtkWidget* vbox = gtk_vbox_new(false, 5);
     gtk_container_add(GTK_CONTAINER(window), vbox);
     gtk_widget_show(vbox);
-
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
 
     image = gtk_image_new();
     gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
