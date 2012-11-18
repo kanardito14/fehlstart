@@ -73,7 +73,8 @@ typedef struct Action {
 static void launch_action(String, Action*);
 static void command_action(String, Action*);
 static void edit_settings_action(String, Action*);
-static void* update_all(void* user_data);
+static void* update_all(void*);
+static void hipster_style(cairo_t*);
 
 //------------------------------------------
 // global variables
@@ -86,10 +87,9 @@ static bool     pref_one_time;
 static char*    pref_border_color       = "default";
 static int      pref_border_width       = 2;
 static char*    pref_window_style       = "default";
+static char*    pref_window_color       = "default";
 static int      pref_window_width       = 200;
 static int      pref_window_height      = 100;
-static unsigned pref_hotkey_key;
-static GdkModifierType pref_hotkey_mod;
 
 // launcher stuff
 static GHashTable*  action_map;
@@ -97,7 +97,12 @@ static GArray*      filter_list;
 static unsigned     selection;
 static char         input_string[INPUT_STRING_SIZE];
 static unsigned     input_string_size;
-static pthread_mutex_t map_mutex;
+static pthread_mutex_t  map_mutex;
+
+// misc
+static void             (*draw_background)(cairo_t* cr);
+static unsigned         hotkey_key;
+static GdkModifierType  hotkey_mod;
 
 // gtk widgets
 static GtkWidget*   window;
@@ -316,7 +321,7 @@ static void filter_scrore_add(gpointer key, gpointer value, gpointer user_data)
         return;
 
     a->score = -1;
-    if (str_starts_with(a->mnemonic, filter))
+    if (str_starts_with(a->mnemonic, filter) || str_starts_with(filter, a->mnemonic))
         a->score = 100000;
 
     if (a->score < 0) {
@@ -376,7 +381,6 @@ static void image_set_icon(GtkImage* img, const char* name)
     }
     int h = pref_window_height / 2;
     GdkPixbuf* pb = NULL;
-    puts(name);
     if (g_path_is_absolute(name)) {
         pb = gdk_pixbuf_new_from_file_at_scale(name, -1, h, true, NULL);
     } else {
@@ -509,7 +513,7 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         break;
     default:
         // the hotkey doesn't work when the popup window grabs the keyboard focus, it has to be caught manually
-        if ((event->state & pref_hotkey_mod) && (event->keyval == pref_hotkey_key)) {
+        if ((event->state & hotkey_mod) && (event->keyval == hotkey_key)) {
             hide_window();
             break;
         }
@@ -538,61 +542,69 @@ static void round_rect(cairo_t* cr, double x, double y, double w, double h, doub
     cairo_arc(cr, x + r, y + r, r, PI, 1.5 * PI);
     cairo_close_path(cr);
 }
-static Color parse_color(const char* color_name, int default_color)
+
+static Color parse_color(const char* color_name, GdkColor default_color)
 {
     GdkColor c = {0, 0, 0, 0};
-    if (!strcasecmp(color_name, "default"))
-        c = gtk_widget_get_style(window)->bg[default_color];
-    else
-        gdk_color_parse(pref_border_color, &c);
+    if (!strcasecmp(color_name, "default") || !gdk_color_parse(color_name, &c))
+        c = default_color;
     Color col = {(double)c.red / 0xffff, (double)c.green / 0xffff, (double)c.blue / 0xffff, 1};
     return col;
 }
 
-static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+void gtk_style(cairo_t* cr)
 {
     double w = pref_window_width, h = pref_window_height;
-    double bw = pref_border_width;
-    Color c0 = parse_color(pref_border_color, GTK_STATE_NORMAL);
-    Color c1 = parse_color(pref_border_color, GTK_STATE_SELECTED);
+    GtkStyle* st = gtk_widget_get_style(window);
 
+    Color c = parse_color(pref_window_color, st->bg[GTK_STATE_NORMAL]);
+    cairo_set_source_rgb(cr, c.r, c.g, c.b);
+    cairo_paint(cr);
+
+    c = parse_color(pref_border_color, st->bg[GTK_STATE_SELECTED]);
+    cairo_rectangle(cr, 0 , 0, w, h);
+    cairo_set_line_width(cr, pref_border_width * 2);
+    cairo_set_source_rgb(cr, c.r, c.g, c.b);
+    cairo_stroke(cr);
+}
+
+void hipster_style(cairo_t* cr)
+{
+    double w = pref_window_width, h = pref_window_height;
+    double brad = fmax(w, h) / 10; // border radius
+    double w2 = w / 2, h3 = w * 3;
+    double crad = sqrt(w2 * w2 + h3 * h3);
+    GtkStyle* st = gtk_widget_get_style(window);
+    Color c = parse_color(pref_window_color, st->bg[GTK_STATE_SELECTED]);
+    
+    round_rect(cr, 0, 0, w, h, brad);
+    cairo_clip(cr);
+    
+    cairo_set_source_rgb(cr, c.r, c.g, c.b);
+    cairo_paint(cr);
+
+    cairo_move_to(cr, 0, 0);
+    cairo_line_to(cr, w, 0);
+    // TODO properly calculate angles (asin/acos)
+    cairo_arc_negative(cr, w2, h * 0.6 + h3, crad, -0.10 * PI, -0.80 * PI);
+    cairo_close_path(cr);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.2);
+    cairo_fill(cr);
+    
+    round_rect(cr, 0, 0, w, h, brad);
+    cairo_set_line_width(cr, pref_border_width * 2);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.5);
+    cairo_stroke(cr);
+}
+
+static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
     cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-
-    if (!strcasecmp(pref_window_style, "gtk")) {
-        cairo_set_source_rgb(cr, c0.r, c0.g, c0.b);
-        cairo_paint(cr);
-        cairo_rectangle(cr, bw / 2, bw / 2, w - bw, h - bw);
-        cairo_set_line_width(cr, bw);
-        cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
-        cairo_stroke(cr);
-    } else {
-        double brad = fmax(w, h) / 10; // border radius
-        round_rect(cr, 0, 0, w, h, brad);
-        cairo_clip(cr);
-
-        cairo_set_source_rgb(cr, c1.r, c1.g, c1.b);
-        cairo_paint(cr);
-
-        double w2 = w / 2, h3 = w * 3;
-        double crad = sqrt(w2 * w2 + h3 * h3);
-        cairo_move_to(cr, 0, 0);
-        cairo_line_to(cr, w, 0);
-        // TODO: properly calculate angles (asin/acos)
-        cairo_arc_negative(cr, w2, h * 0.6 + h3, crad, -0.10 * PI, -0.80 * PI);
-        cairo_close_path(cr);
-
-        cairo_set_source_rgba(cr, 1, 1, 1, 0.2);
-        cairo_fill(cr);
-
-        round_rect(cr, 0, 0, w, h, brad);
-        cairo_set_line_width(cr, bw * 2);
-        cairo_set_source_rgba(cr, 1, 1, 1, 0.5);
-        cairo_stroke(cr);
-    }
+    draw_background(cr);
     cairo_destroy(cr);
     return false;
 }
@@ -656,6 +668,7 @@ static void save_config(void)
     WRITE_PREF(string, "Border", "color", border_color);
     WRITE_PREF(integer, "Border", "width", border_width);
     WRITE_PREF(string, "Window", "style", window_style);
+    WRITE_PREF(string, "Window", "color", window_color);
     WRITE_PREF(integer, "Window", "width", window_width);
     WRITE_PREF(integer, "Window", "height", window_height);
     key_file_save(kf, config_file);
@@ -683,14 +696,16 @@ static void read_config(void)
         READ_PREF(string, "Border", "color", border_color);
         READ_PREF(integer, "Border", "width", border_width);
         READ_PREF(string, "Window", "style", window_style);
+        READ_PREF(string, "Window", "color", window_color);
         READ_PREF(integer, "Window", "width", window_width);
         READ_PREF(integer, "Window", "height", window_height);
     }
     g_key_file_free(kf);
-    // some sanity checks
     pref_border_width = irange(pref_border_width, 0, 20);
     pref_window_width = irange(pref_window_width, 200, 800);
     pref_window_height = irange(pref_window_height, 100, 800);
+    draw_background = !strcasecmp(pref_window_style, "gtk") ? gtk_style : hipster_style;
+    
 }
 #undef READ_PREF
 
@@ -780,7 +795,7 @@ static void register_hotkey(void)
         return;
     keybinder_init();
     if (keybinder_bind(pref_hotkey, toggle_window, NULL)) {
-        gtk_accelerator_parse(pref_hotkey, &pref_hotkey_key, &pref_hotkey_mod);
+        gtk_accelerator_parse(pref_hotkey, &hotkey_key, &hotkey_mod);
         printf("hit %s to show window\n", pref_hotkey);
     } else {
         GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
@@ -871,9 +886,10 @@ static void command_action(String command, Action* action)
     setsid();                   // "detatch" from parent process
     signal(SIGCHLD, SIG_DFL);   // back to default child behaviour
     unsigned sp = str_find_first(command, STR_S(" ")); // everything after first space is arguments
-    String cmd = str_concat(action->key, str_substring(command, sp, STR_END));
+    String cmd = str_concat(action->exec, str_substring(command, sp, STR_END));
     if (system(cmd.str)) {};    // shut up gcc warning
     str_free(cmd);
+    exit(EXIT_SUCCESS);
 }
 
 static void edit_settings_action(String command, Action* action)
