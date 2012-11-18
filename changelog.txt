@@ -1,3 +1,7 @@
+0.3.1
+ * window color setting
+ * fixed crash with commands
+
 0.3.0
  * updated gui
  * complete internal overhaul
