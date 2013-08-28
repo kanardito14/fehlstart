@@ -7,8 +7,8 @@ PKGS = keybinder gio-unix-2.0
 INCS = $(shell pkg-config --cflags $(PKGS))
 LIBS = $(shell pkg-config --libs $(PKGS))
 
-CFLAGS	:= -Wall -Wextra -Wno-unused-parameter -std=c99 $(INCS) $(CFLAGS)
-LDFLAGS	:= $(LIBS) $(LDFLAGS)
+CFLAGS	:= -Wall -Wextra -Wno-unused-parameter -pthread -std=c99 $(INCS) $(CFLAGS)
+LDFLAGS	:= -pthread -lm $(LIBS) $(LDFLAGS)
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
