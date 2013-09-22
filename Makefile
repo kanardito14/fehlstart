@@ -16,7 +16,7 @@ OBJS = $(SRCS:.c=.o)
 ifeq ($(DEBUG),1)
     OFLAGS = -DDEBUG -g
 else
-    OFLAGS = -DNDEBUG -O2 -s
+    OFLAGS = -DNDEBUG -O2 
 endif
 
 all: fehlstart
