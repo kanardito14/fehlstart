@@ -2,12 +2,7 @@
 *   fehlstart - a small launcher written in c99
 *   this source is published under the GPLv3 license.
 *   get the license from: http://www.gnu.org/licenses/gpl-3.0.txt
-*   copyright 2011 maep and contributors
-*
-*   some terminology:
-*   action: the thing that the user selects
-*   launcher: program launcher defined by a .desktop file
-*   command: user defined action from commands.rc file
+*   copyright 2013 maep and contributors
 */
 
 #include <string.h>
@@ -33,19 +28,20 @@
 #include "string.h"
 
 // macros
-#define WELCOME_MESSAGE     "..."
-#define NO_MATCH_MESSAGE    "???"
-#define APPLICATION_ICON    "applications-other"
-#define DEFAULT_HOTKEY      "<Super>space"
-#define ICON_SIZE           GTK_ICON_SIZE_DIALOG
-#define DEFAULT_ICON        GTK_STOCK_FIND
-#define NO_MATCH_ICON       GTK_STOCK_DIALOG_QUESTION
-#define INPUT_STRING_SIZE   20
-#define SHOW_IGNORE_TIME    100000
-#define PI                  3.14159265359
-#define APPLICATIONS_DIR_0  "/usr/share/applications"
-#define APPLICATIONS_DIR_1  "/usr/local/share/applications"
+#define WELCOME_MESSAGE         "..."
+#define NO_MATCH_MESSAGE        "???"
+#define APPLICATION_ICON        "applications-other"
+#define DEFAULT_HOTKEY          "<Super>space"
+#define ICON_SIZE               GTK_ICON_SIZE_DIALOG
+#define DEFAULT_ICON            GTK_STOCK_FIND
+#define NO_MATCH_ICON           GTK_STOCK_DIALOG_QUESTION
+#define INPUT_STRING_SIZE       20
+#define SHOW_IGNORE_TIME        100000
+#define PI                      0x1.921fb54442d18p+1
+#define APPLICATIONS_DIR_0      "/usr/share/applications"
+#define APPLICATIONS_DIR_1      "/usr/local/share/applications"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
+#define COUNTOF(array)          (sizeof array / sizeof array[0])
 
 typedef struct {
     double r;
@@ -74,7 +70,6 @@ static void launch_action(String, Action*);
 static void command_action(String, Action*);
 static void edit_settings_action(String, Action*);
 static void* update_all(void*);
-static void hipster_style(cairo_t*);
 
 //------------------------------------------
 // global variables
@@ -92,34 +87,31 @@ static int      pref_window_width       = 200;
 static int      pref_window_height      = 100;
 
 // launcher stuff
-static GHashTable*  action_map;
-static GArray*      filter_list;
-static unsigned     selection;
-static char         input_string[INPUT_STRING_SIZE];
-static unsigned     input_string_size;
+static GHashTable*      action_map;
+static GArray*          filter_list;
+static unsigned         selection;
+static char             input_string[INPUT_STRING_SIZE];
+static unsigned         input_string_size;
 static pthread_mutex_t  map_mutex;
 
-// misc
-static void             (*draw_background)(cairo_t* cr);
+// user interface
 static unsigned         hotkey_key;
 static GdkModifierType  hotkey_mod;
-
-// gtk widgets
-static GtkWidget*   window;
-static GtkWidget*   image;
-static GtkWidget*   action_label;
-static GtkWidget*   input_label;
+static GdkPixbuf*       icon_pixbuf;
+static GtkWidget*       window;
+static const char*      action_name;
 
 // files
-static char*    config_file;
-static char*    action_file;
-static char*    commands_file;
-static char*    user_app_dir;
+static char*            config_file;
+static char*            action_file;
+static char*            commands_file;
+static char*            user_app_dir;
 
 //------------------------------------------
 // helper functions
 
-inline static int irange(int v, int min, int max) { return v < min ? min : v > max ? max : v; }
+inline static int imin(int a, int b) { return a < b ? a : b; }
+inline static int iclamp(int v, int min, int max) { return v < min ? min : v > max ? max : v; }
 
 static bool is_readable_file(const char* file)
 {
@@ -348,10 +340,10 @@ static int compare_score(gconstpointer a, gconstpointer b)
 
 static void filter_action_list(String filter)
 {
-    if (filter.len == 0)
-        return;
     if (filter_list->len)
         g_array_remove_range(filter_list, 0, filter_list->len);
+    if (filter.len == 0)
+        return;        
     g_hash_table_foreach(action_map, filter_scrore_add, &filter);
     g_array_sort(filter_list, compare_score);
 }
@@ -373,51 +365,51 @@ static void run_selected(void)
 //------------------------------------------
 // gui functions
 
-static void image_set_icon(GtkImage* img, const char* name)
+static void load_icon(const char* name)
 {
-    if (!pref_show_icon) {
-        gtk_image_clear(img);
-        return;
+    const int sizes[] = {256, 128, 48, 32};
+    if (icon_pixbuf) {
+        g_object_unref(icon_pixbuf);
+        icon_pixbuf = NULL;
     }
+    
+    if (!pref_show_icon)
+        return;
+       
+    // if the size is uncommon, svgs might be used which load 
+    // too slow on my atom machine
     int h = pref_window_height / 2;
-    GdkPixbuf* pb = NULL;
+    // TODO if (!pref_scale_icon) 
+    {
+        int i = 0;
+        for (; i < (int)COUNTOF(sizes) && h < sizes[i]; i++) {}
+        h = sizes[i];
+    }
     if (g_path_is_absolute(name)) {
-        pb = gdk_pixbuf_new_from_file_at_scale(name, -1, h, true, NULL);
+        icon_pixbuf = gdk_pixbuf_new_from_file_at_scale(name, -1, h, true, NULL);
     } else {
         int flags = GTK_ICON_LOOKUP_FORCE_SIZE | GTK_ICON_LOOKUP_USE_BUILTIN;
         GtkIconTheme* theme = gtk_icon_theme_get_default();
-        pb = gtk_icon_theme_load_icon(theme, name, h, flags, NULL);
-    }
-    if (pb) {
-        gtk_image_set_from_pixbuf(img, pb);
-        g_object_unref(pb);
-    } else {
-        // TODO: show error icon
-        gtk_image_clear(img);
+        icon_pixbuf = gtk_icon_theme_load_icon(theme, name, h, flags, NULL);
     }
 }
 
 static void show_selected(void)
 {
-    const char* action_text = NO_MATCH_MESSAGE;
     const char* icon_name = NO_MATCH_ICON;
+    action_name = NO_MATCH_MESSAGE;
 
     if (input_string_size == 0) {
-        action_text = WELCOME_MESSAGE;
+        action_name = WELCOME_MESSAGE;
         icon_name = DEFAULT_ICON;
     } else if (filter_list->len > 0) {
         Action* a = g_array_index(filter_list, Action*, selection);
-        action_text = a->name.str;
+        action_name = a->name.str;
         icon_name = a->icon.str;
     }
 
-    gtk_label_set_text(GTK_LABEL(input_label), input_string);
-    gtk_label_set_text(GTK_LABEL(action_label), action_text);
-    image_set_icon(GTK_IMAGE(image), icon_name);
-
-    gtk_widget_queue_draw(input_label);
-    gtk_widget_queue_draw(action_label);
-    gtk_widget_queue_draw(image);
+    load_icon(icon_name);
+    gtk_widget_queue_draw(window);
 }
 
 static void handle_text_input(GdkEventKey* event)
@@ -448,6 +440,8 @@ static void hide_window(void)
     input_string[0] = 0;
     input_string_size = 0;
     selection = 0;
+    if (filter_list->len)
+        g_array_remove_range(filter_list, 0, filter_list->len);
 }
 
 static void show_window(void)
@@ -512,7 +506,7 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         show_selected();
         break;
     default:
-        // the hotkey doesn't work when the popup window grabs the keyboard focus, it has to be caught manually
+        // libkeybinder doesn't work when the popup window grabs the keyboard focus, it has to be caught manually
         if ((event->state & hotkey_mod) && (event->keyval == hotkey_key)) {
             hide_window();
             break;
@@ -552,23 +546,62 @@ static Color parse_color(const char* color_name, GdkColor default_color)
     return col;
 }
 
-void gtk_style(cairo_t* cr)
+static void draw_labels(cairo_t* cr, const char* action, const char* input)
 {
-    double w = pref_window_width, h = pref_window_height;
-    GtkStyle* st = gtk_widget_get_style(window);
+    cairo_text_extents_t extents;
 
-    Color c = parse_color(pref_window_color, st->bg[GTK_STATE_NORMAL]);
-    cairo_set_source_rgb(cr, c.r, c.g, c.b);
-    cairo_paint(cr);
+    int max_width = pref_window_width - pref_border_width * 2;    
+    int size = 14;
+    do { 
+        cairo_set_font_size(cr, size);
+        cairo_text_extents(cr, action, &extents);
+        size--;
+    } while (extents.width > max_width && size > 6);
+    double x = (pref_window_width - extents.width) / 2.0;
+    double y = pref_window_height * 0.75;
+    cairo_move_to(cr, x, y);
+    cairo_show_text(cr, action);
 
-    c = parse_color(pref_border_color, st->bg[GTK_STATE_SELECTED]);
-    cairo_rectangle(cr, 0 , 0, w, h);
-    cairo_set_line_width(cr, pref_border_width * 2);
-    cairo_set_source_rgb(cr, c.r, c.g, c.b);
-    cairo_stroke(cr);
+    cairo_set_font_size(cr, 12);
+    cairo_text_extents(cr, input, &extents);
+    x = (pref_window_width - extents.width) / 2.0;
+    y = pref_window_height - extents.height;
+    cairo_move_to(cr, x, y);
+    cairo_show_text(cr, input); 
 }
 
-void hipster_style(cairo_t* cr)
+static void draw_icon(cairo_t* cr, GdkPixbuf* icon)
+{
+    if (!icon_pixbuf)
+        return;
+    double x = (pref_window_width - gdk_pixbuf_get_width(icon)) / 2.0;
+    double y = (pref_window_height / 2 - gdk_pixbuf_get_height(icon)) / 2.0;
+    gdk_cairo_set_source_pixbuf(cr, icon, x, y);
+    cairo_paint(cr);
+}
+
+static void draw_dots(cairo_t* cr, int index, int max)
+{
+    // TODO read colors from config
+    if (max < 1)
+        return;  
+    double r = 2.0; // circle radius
+    double w = pref_window_width;
+    double y = pref_window_height / 2.0;
+    GtkStyle* st = gtk_widget_get_style(window);
+    Color c = parse_color("default", st->text[GTK_STATE_SELECTED]);
+
+    for (int i = 0; i < imin(3, index); i++)
+        cairo_arc(cr, r * 3 * (i + 1), y, r, 0, 2 * PI);
+    for (int i = 0; i < imin(3, max - index - 1); i++)
+        cairo_arc(cr, w - (r * 3 * (i + 1)), y, r, 0, 2 * PI);
+        
+    cairo_close_path(cr);
+    cairo_set_source_rgb(cr, c.r, c.g, c.b);
+    cairo_fill(cr);
+}
+
+static void draw_window(cairo_t* cr)
 {
     double w = pref_window_width, h = pref_window_height;
     double brad = fmax(w, h) / 10; // border radius
@@ -597,14 +630,22 @@ void hipster_style(cairo_t* cr)
     cairo_stroke(cr);
 }
 
-static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+static void clear(cairo_t* cr)
 {
-    cairo_t* cr = gdk_cairo_create(widget->window);
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_paint(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-    draw_background(cr);
+}
+
+static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+    cairo_t* cr = gdk_cairo_create(widget->window);
+    clear(cr);
+    draw_window(cr);
+    draw_icon(cr, icon_pixbuf);
+    draw_dots(cr, selection, filter_list->len);
+    draw_labels(cr, action_name, input_string);
     cairo_destroy(cr);
     return false;
 }
@@ -623,21 +664,21 @@ static void create_widgets(void)
     g_signal_connect(window, "expose-event", G_CALLBACK(expose_event), NULL);
     g_signal_connect(window, "screen-changed", G_CALLBACK(screen_changed), NULL);
 
-    GtkWidget* vbox = gtk_vbox_new(false, 5);
-    gtk_container_add(GTK_CONTAINER(window), vbox);
-    gtk_widget_show(vbox);
+//    GtkWidget* vbox = gtk_vbox_new(false, 5);
+//    gtk_container_add(GTK_CONTAINER(window), vbox);
+//    gtk_widget_show(vbox);
 
-    image = gtk_image_new();
-    gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
-    gtk_widget_show(image);
+//    image = gtk_image_new();
+//    gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
+//    gtk_widget_show(image);
 
-    action_label = gtk_label_new(WELCOME_MESSAGE);
-    gtk_box_pack_start(GTK_BOX(vbox), action_label, true, true, 0);
-    gtk_widget_show(action_label);
+//    action_label = gtk_label_new(WELCOME_MESSAGE);
+//    gtk_box_pack_start(GTK_BOX(vbox), action_label, true, true, 0);
+//    gtk_widget_show(action_label);
 
-    input_label = gtk_label_new("");
-    gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
-    gtk_widget_show(input_label);
+//    input_label = gtk_label_new("");
+//    gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
+//    gtk_widget_show(input_label);
     screen_changed(window, NULL, NULL);
 }
 
@@ -701,11 +742,9 @@ static void read_config(void)
         READ_PREF(integer, "Window", "height", window_height);
     }
     g_key_file_free(kf);
-    pref_border_width = irange(pref_border_width, 0, 20);
-    pref_window_width = irange(pref_window_width, 200, 800);
-    pref_window_height = irange(pref_window_height, 100, 800);
-    draw_background = !strcasecmp(pref_window_style, "gtk") ? gtk_style : hipster_style;
-    
+    pref_border_width = iclamp(pref_border_width, 0, 20);
+    pref_window_width = iclamp(pref_window_width, 200, 800);
+    pref_window_height = iclamp(pref_window_height, 100, 800);
 }
 #undef READ_PREF
 
