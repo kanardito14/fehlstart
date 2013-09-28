@@ -496,13 +496,17 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
         run_selected();
         hide_window();
         break;
+    case GDK_Left:
     case GDK_Up:
+        if (filter_list->len)
+            selection = (selection + filter_list->len - 1) % filter_list->len;        
+        show_selected();
+        break;    
+    case GDK_Right:
     case GDK_Tab:
     case GDK_Down:
-        if (filter_list->len) {
-            selection += (event->keyval == GDK_Up) ? filter_list->len - 1 : 1;
-            selection %= filter_list->len;
-        }
+        if (filter_list->len)
+            selection = (selection + 1) % filter_list->len;
         show_selected();
         break;
     default:
@@ -549,13 +553,15 @@ static Color parse_color(const char* color_name, GdkColor default_color)
 static void draw_labels(cairo_t* cr, const char* action, const char* input)
 {
     cairo_text_extents_t extents;
-
+    GtkStyle* st = gtk_widget_get_style(window);
+    Color c = parse_color("default", st->text[GTK_STATE_SELECTED]);
+    cairo_set_source_rgb(cr, c.r, c.g, c.b);
+    
     int max_width = pref_window_width - pref_border_width * 2;    
     int size = 14;
-    do { 
-        cairo_set_font_size(cr, size);
+    do {
+        cairo_set_font_size(cr, size--);
         cairo_text_extents(cr, action, &extents);
-        size--;
     } while (extents.width > max_width && size > 6);
     double x = (pref_window_width - extents.width) / 2.0;
     double y = pref_window_height * 0.75;
@@ -565,7 +571,7 @@ static void draw_labels(cairo_t* cr, const char* action, const char* input)
     cairo_set_font_size(cr, 12);
     cairo_text_extents(cr, input, &extents);
     x = (pref_window_width - extents.width) / 2.0;
-    y = pref_window_height - extents.height;
+    y = pref_window_height - pref_border_width * 2.0;
     cairo_move_to(cr, x, y);
     cairo_show_text(cr, input); 
 }
