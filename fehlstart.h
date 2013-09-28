@@ -2,11 +2,56 @@
 *   fehlstart - a small launcher written in c99
 *   this source is published under the GPLv3 license.
 *   get the license from: http://www.gnu.org/licenses/gpl-3.0.txt
-*   copyright 2011 maep and contributors
+*   copyright 2013 maep and contributors
 */
 
 #include <stdbool.h>
 #include <stdint.h>
+
+// --------------------------------------------
+// preferences
+
+// some typedefs so the xmacros will work
+typedef char* string;
+typedef bool boolean;
+typedef int integer;
+
+#define PREFERENCES_LIST \
+    P(string,  Bindings, launch,     DEFAULT_HOTKEY) \
+    P(boolean, Matching, executable, true) \
+    P(boolean, Icons,    show,       true) \
+    P(boolean, Icons,    scale,      true) \
+    P(string,  Border,   color,      "default") \
+    P(integer, Border,   width,      2) \
+    P(string,  Window,   color,      "default") \
+    P(string,  Window,   width,      200) \
+    P(string,  Window,   height,     100) \
+    P(boolean, Window,   round,      true) \
+    P(boolean, Window,   arch,       true) \
+    P(string,  Labels,   color,      "default") \
+    P(integer, Labels,   fontsize1,  14) \
+    P(integer, Labels,   fontsize2,  10) \
+    P(boolean, Labels,   showinput,  true)
+    
+#define P(type, group, key, value) extern type group##_##key = value;
+PREFERENCES_LIST
+#undef P
+
+// --------------------------------------------
+// helper functions
+
+inline static int imin(int a, int b) 
+{ 
+    return a < b ? a : b; 
+}
+
+inline static int iclamp(int v, int min, int max) 
+{ 
+    return v < min ? min : v > max ? max : v; 
+}
+
+// --------------------------------------------
+// string.c functions
 
 typedef struct {
     char* str;

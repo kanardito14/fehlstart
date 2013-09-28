@@ -12,7 +12,7 @@
 
 #include <strings.h>
 #include <dirent.h>
-#include <signal.h>
+//#include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -25,7 +25,7 @@
 
 #include <keybinder.h>
 
-#include "string.h"
+#include "fehlstart.h"
 
 // macros
 #define WELCOME_MESSAGE         "..."
@@ -74,17 +74,11 @@ static void* update_all(void*);
 //------------------------------------------
 // global variables
 
-// preferences
-static char*    pref_hotkey             = DEFAULT_HOTKEY;
-static bool     pref_match_executable   = true;
-static bool     pref_show_icon          = true;
-static bool     pref_one_time;
-static char*    pref_border_color       = "default";
-static int      pref_border_width       = 2;
-static char*    pref_window_style       = "default";
-static char*    pref_window_color       = "default";
-static int      pref_window_width       = 200;
-static int      pref_window_height      = 100;
+// preferences/switches
+#define P(type, group, name, value) type group##_##name = value;;
+PREFERENCES_LIST
+#undef P
+static bool             one_time;
 
 // launcher stuff
 static GHashTable*      action_map;
@@ -109,9 +103,6 @@ static char*            user_app_dir;
 
 //------------------------------------------
 // helper functions
-
-inline static int imin(int a, int b) { return a < b ? a : b; }
-inline static int iclamp(int v, int min, int max) { return v < min ? min : v > max ? max : v; }
 
 static bool is_readable_file(const char* file)
 {
@@ -198,10 +189,10 @@ static void load_launcher(String file, Action* action)
     if (action->used) {
         GAppInfo* app = G_APP_INFO(info);
         action->name = str_new(g_app_info_get_name(app));
-        if (pref_match_executable)
+        if (Matching_executable)
             action->exec = str_new(g_app_info_get_executable(app));
         GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (icon != NULL && pref_show_icon)
+        if (icon != NULL && Icons_show)
             action->icon = str_own(g_icon_to_string(icon));
     }
     g_object_unref(info);
@@ -373,14 +364,13 @@ static void load_icon(const char* name)
         icon_pixbuf = NULL;
     }
     
-    if (!pref_show_icon)
+    if (!Icons_show)
         return;
        
     // if the size is uncommon, svgs might be used which load 
     // too slow on my atom machine
-    int h = pref_window_height / 2;
-    // TODO if (!pref_scale_icon) 
-    {
+    int h = Window_height / 2;
+    if (!Icons_scale) {
         int i = 0;
         for (; i < (int)COUNTOF(sizes) && h < sizes[i]; i++) {}
         h = sizes[i];
@@ -433,7 +423,7 @@ static void hide_window(void)
 
     gdk_keyboard_ungrab(GDK_CURRENT_TIME);
 
-    if (pref_one_time) // configured for one-time use
+    if (one_time) // configured for one-time use
         gtk_main_quit();
 
     gtk_widget_hide(window);
@@ -452,7 +442,7 @@ static void show_window(void)
     pthread_t thread = 0;
     pthread_create(&thread, NULL, update_all, NULL);
     show_selected();
-    gtk_widget_set_size_request(window, pref_window_width, pref_window_height);
+    gtk_widget_set_size_request(window, Window_width, Window_height);
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ALWAYS);
     gtk_window_present(GTK_WINDOW(window));
     gtk_window_set_keep_above(GTK_WINDOW(window), true);
@@ -532,118 +522,6 @@ static void screen_changed(GtkWidget *widget, GdkScreen *old_screen, gpointer us
     gtk_widget_set_colormap(widget, colormap);
 }
 
-static void round_rect(cairo_t* cr, double x, double y, double w, double h, double r)
-{
-    cairo_arc(cr, x + w - r, y + r, r, 1.5 * PI, 0);
-    cairo_arc(cr, x + w - r, y + h - r, r, 0, 0.5 * PI);
-    cairo_arc(cr, x + r, y + h - r, r, 0.5 * PI, PI);
-    cairo_arc(cr, x + r, y + r, r, PI, 1.5 * PI);
-    cairo_close_path(cr);
-}
-
-static Color parse_color(const char* color_name, GdkColor default_color)
-{
-    GdkColor c = {0, 0, 0, 0};
-    if (!strcasecmp(color_name, "default") || !gdk_color_parse(color_name, &c))
-        c = default_color;
-    Color col = {(double)c.red / 0xffff, (double)c.green / 0xffff, (double)c.blue / 0xffff, 1};
-    return col;
-}
-
-static void draw_labels(cairo_t* cr, const char* action, const char* input)
-{
-    cairo_text_extents_t extents;
-    GtkStyle* st = gtk_widget_get_style(window);
-    Color c = parse_color("default", st->text[GTK_STATE_SELECTED]);
-    cairo_set_source_rgb(cr, c.r, c.g, c.b);
-    
-    int max_width = pref_window_width - pref_border_width * 2;    
-    int size = 14;
-    do {
-        cairo_set_font_size(cr, size--);
-        cairo_text_extents(cr, action, &extents);
-    } while (extents.width > max_width && size > 6);
-    double x = (pref_window_width - extents.width) / 2.0;
-    double y = pref_window_height * 0.75;
-    cairo_move_to(cr, x, y);
-    cairo_show_text(cr, action);
-
-    cairo_set_font_size(cr, 12);
-    cairo_text_extents(cr, input, &extents);
-    x = (pref_window_width - extents.width) / 2.0;
-    y = pref_window_height - pref_border_width * 2.0;
-    cairo_move_to(cr, x, y);
-    cairo_show_text(cr, input); 
-}
-
-static void draw_icon(cairo_t* cr, GdkPixbuf* icon)
-{
-    if (!icon_pixbuf)
-        return;
-    double x = (pref_window_width - gdk_pixbuf_get_width(icon)) / 2.0;
-    double y = (pref_window_height / 2 - gdk_pixbuf_get_height(icon)) / 2.0;
-    gdk_cairo_set_source_pixbuf(cr, icon, x, y);
-    cairo_paint(cr);
-}
-
-static void draw_dots(cairo_t* cr, int index, int max)
-{
-    // TODO read colors from config
-    if (max < 1)
-        return;  
-    double r = 2.0; // circle radius
-    double w = pref_window_width;
-    double y = pref_window_height / 2.0;
-    GtkStyle* st = gtk_widget_get_style(window);
-    Color c = parse_color("default", st->text[GTK_STATE_SELECTED]);
-
-    for (int i = 0; i < imin(3, index); i++)
-        cairo_arc(cr, r * 3 * (i + 1), y, r, 0, 2 * PI);
-    for (int i = 0; i < imin(3, max - index - 1); i++)
-        cairo_arc(cr, w - (r * 3 * (i + 1)), y, r, 0, 2 * PI);
-        
-    cairo_close_path(cr);
-    cairo_set_source_rgb(cr, c.r, c.g, c.b);
-    cairo_fill(cr);
-}
-
-static void draw_window(cairo_t* cr)
-{
-    double w = pref_window_width, h = pref_window_height;
-    double brad = fmax(w, h) / 10; // border radius
-    double w2 = w / 2, h3 = w * 3;
-    double crad = sqrt(w2 * w2 + h3 * h3);
-    GtkStyle* st = gtk_widget_get_style(window);
-    Color c = parse_color(pref_window_color, st->bg[GTK_STATE_SELECTED]);
-    
-    round_rect(cr, 0, 0, w, h, brad);
-    cairo_clip(cr);
-    
-    cairo_set_source_rgb(cr, c.r, c.g, c.b);
-    cairo_paint(cr);
-
-    cairo_move_to(cr, 0, 0);
-    cairo_line_to(cr, w, 0);
-    // TODO properly calculate angles (asin/acos)
-    cairo_arc_negative(cr, w2, h * 0.6 + h3, crad, -0.10 * PI, -0.80 * PI);
-    cairo_close_path(cr);
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.2);
-    cairo_fill(cr);
-    
-    round_rect(cr, 0, 0, w, h, brad);
-    cairo_set_line_width(cr, pref_border_width * 2);
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.5);
-    cairo_stroke(cr);
-}
-
-static void clear(cairo_t* cr)
-{
-    cairo_set_source_rgba(cr, 0, 0, 0, 0);
-    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-    cairo_paint(cr);
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-}
-
 static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
     cairo_t* cr = gdk_cairo_create(widget->window);
@@ -670,21 +548,6 @@ static void create_widgets(void)
     g_signal_connect(window, "expose-event", G_CALLBACK(expose_event), NULL);
     g_signal_connect(window, "screen-changed", G_CALLBACK(screen_changed), NULL);
 
-//    GtkWidget* vbox = gtk_vbox_new(false, 5);
-//    gtk_container_add(GTK_CONTAINER(window), vbox);
-//    gtk_widget_show(vbox);
-
-//    image = gtk_image_new();
-//    gtk_box_pack_start(GTK_BOX(vbox), image, true, false, 0);
-//    gtk_widget_show(image);
-
-//    action_label = gtk_label_new(WELCOME_MESSAGE);
-//    gtk_box_pack_start(GTK_BOX(vbox), action_label, true, true, 0);
-//    gtk_widget_show(action_label);
-
-//    input_label = gtk_label_new("");
-//    gtk_box_pack_start(GTK_BOX(vbox), input_label, true, false, 0);
-//    gtk_widget_show(input_label);
     screen_changed(window, NULL, NULL);
 }
 
@@ -704,29 +567,17 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
 }
 
 // macro for writing to keyfile
-#define WRITE_PREF(type, group, key, var) g_key_file_set_##type (kf, group, key, pref_##var)
 static void save_config(void)
 {
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-    WRITE_PREF(string, "Bindings", "launch", hotkey);
-    WRITE_PREF(boolean, "Matching", "executable", match_executable);
-    WRITE_PREF(boolean, "Icons", "show", show_icon);
-    WRITE_PREF(string, "Border", "color", border_color);
-    WRITE_PREF(integer, "Border", "width", border_width);
-    WRITE_PREF(string, "Window", "style", window_style);
-    WRITE_PREF(string, "Window", "color", window_color);
-    WRITE_PREF(integer, "Window", "width", window_width);
-    WRITE_PREF(integer, "Window", "height", window_height);
+    #define P(type, group, key, value) g_key_file_set_##type (kf, #group, #key, group##_##key);
+    PREFERENCES_LIST
+    #undef P
     key_file_save(kf, config_file);
     g_key_file_free(kf);
 }
-#undef WRITE_PREF
 
-// macro for reading from keyfile, without overwriting default values
-#define READ_PREF(type, group, key, var)            \
-    if (g_key_file_has_key(kf, group, key, NULL))   \
-        pref_##var = g_key_file_get_##type (kf, group, key, NULL)
 static void read_config(void)
 {
     static time_t config_file_time;
@@ -737,22 +588,18 @@ static void read_config(void)
 
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL)) {
-        READ_PREF(string, "Bindings", "launch", hotkey);
-        READ_PREF(boolean, "Matching", "executable", match_executable);
-        READ_PREF(boolean, "Icons", "show", show_icon);
-        READ_PREF(string, "Border", "color", border_color);
-        READ_PREF(integer, "Border", "width", border_width);
-        READ_PREF(string, "Window", "style", window_style);
-        READ_PREF(string, "Window", "color", window_color);
-        READ_PREF(integer, "Window", "width", window_width);
-        READ_PREF(integer, "Window", "height", window_height);
+        #define P(type, group, key, value) if (g_key_file_has_key(kf, #group, #key, NULL))\
+            group##_##key = g_key_file_get_##type(kf, #group, #key, NULL);
+        PREFERENCES_LIST
+        #undef P
     }
     g_key_file_free(kf);
-    pref_border_width = iclamp(pref_border_width, 0, 20);
-    pref_window_width = iclamp(pref_window_width, 200, 800);
-    pref_window_height = iclamp(pref_window_height, 100, 800);
+    Border_width = iclamp(Border_width, 0, 20);
+    Window_width = iclamp(Window_width, 200, 800);
+    Window_height = iclamp(Window_height, 100, 800);
+    Labels_fontsize1 = iclamp(Labels_fontsize1, 6, 32);
+    Labels_fontsize2 = iclamp(Labels_fontsize2, 6, 32);
 }
-#undef READ_PREF
 
 static void save_mnemonics(void)
 {
@@ -836,15 +683,15 @@ static void run_editor(const char* file)
 
 static void register_hotkey(void)
 {
-    if (pref_one_time)
+    if (one_time)
         return;
     keybinder_init();
-    if (keybinder_bind(pref_hotkey, toggle_window, NULL)) {
-        gtk_accelerator_parse(pref_hotkey, &hotkey_key, &hotkey_mod);
-        printf("hit %s to show window\n", pref_hotkey);
+    if (keybinder_bind(Bindings_launch, toggle_window, NULL)) {
+        gtk_accelerator_parse(Bindings_launch, &hotkey_key, &hotkey_mod);
+        printf("hit %s to show window\n", Bindings_launch);
     } else {
         GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
-            GTK_BUTTONS_NONE, "Hotkey '%s' is already being used!", pref_hotkey);
+            GTK_BUTTONS_NONE, "Hotkey '%s' is already being used!", Bindings_launch);
         gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Edit Settings", GTK_RESPONSE_ACCEPT,
             "Cancel", GTK_RESPONSE_REJECT, NULL);
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
@@ -892,9 +739,9 @@ static void parse_commandline(int argc, char** argv)
 {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--one-way")) {
-            pref_one_time = true;
+            one_time = true;
         } else if (!strcmp(argv[i], "--help")) {
-            printf("fehlstart 0.3.1 (c) 2012 maep\noptions:\n"\
+            printf("fehlstart 0.4.0 (c) 2013 maep\noptions:\n"
                    "\t--one-way\texit after one use\n");
             exit(EXIT_SUCCESS);
         } else {
@@ -980,7 +827,7 @@ int main(int argc, char** argv)
     load_mnemonics();
 
     create_widgets();
-    if (pref_one_time) // one-time use
+    if (one_time) // one-time use
         show_window();
     else
         register_hotkey();
