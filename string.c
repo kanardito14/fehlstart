@@ -2,7 +2,7 @@
 *   fehlstart - a small launcher written in c99
 *   this source is published under the GPLv3 license.
 *   get the license from: http://www.gnu.org/licenses/gpl-3.0.txt
-*   copyright 2011 maep and contributors
+*   copyright 2013 maep and contributors
 */
 
 #include <string.h>
@@ -10,8 +10,6 @@
 #include <malloc.h>
 
 #include "fehlstart.h"
-
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
 {

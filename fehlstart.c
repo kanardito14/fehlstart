@@ -12,7 +12,7 @@
 
 #include <strings.h>
 #include <dirent.h>
-//#include <signal.h>
+#include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -27,43 +27,21 @@
 
 #include "fehlstart.h"
 
-// macros
-#define WELCOME_MESSAGE         "..."
-#define NO_MATCH_MESSAGE        "???"
-#define APPLICATION_ICON        "applications-other"
-#define DEFAULT_HOTKEY          "<Super>space"
-#define ICON_SIZE               GTK_ICON_SIZE_DIALOG
-#define DEFAULT_ICON            GTK_STOCK_FIND
-#define NO_MATCH_ICON           GTK_STOCK_DIALOG_QUESTION
-#define INPUT_STRING_SIZE       20
-#define SHOW_IGNORE_TIME        100000
-#define PI                      0x1.921fb54442d18p+1
-#define APPLICATIONS_DIR_0      "/usr/share/applications"
-#define APPLICATIONS_DIR_1      "/usr/local/share/applications"
-#define USER_APPLICATIONS_DIR   ".local/share/applications"
-#define COUNTOF(array)          (sizeof array / sizeof array[0])
-
-typedef struct {
-    double r;
-    double g;
-    double b;
-    double a;
-} Color;
+// types
 
 typedef struct Action {
-    String  key;                // map key, .desktop file
-    time_t  file_time;          // .desktop time stamp
-    String  name;               // display caption
-    String  exec;               // executable / hint
-    String  mnemonic;           // what user typed
-    String  icon;
-    int     score;              // calculated prority
-    time_t  time;               // last used timestamp
-    void    (*action)(String, struct Action*);
-    bool    used;               // unused actions are kept for caching
+    String      key;                // map key, .desktop file
+    time_t      file_time;          // .desktop time stamp
+    String      name;               // display caption
+    String      exec;               // executable / hint
+    String      mnemonic;           // what user typed
+    String      icon;
+    int         score;              // calculated prority
+    time_t      time;               // last used timestamp
+    void        (*action)(String, struct Action*);
+    bool        used;               // unused actions are cached to speed scans
 } Action;
 
-//------------------------------------------
 // forward declarations
 
 static void launch_action(String, Action*);
@@ -71,14 +49,26 @@ static void command_action(String, Action*);
 static void edit_settings_action(String, Action*);
 static void* update_all(void*);
 
-//------------------------------------------
-// global variables
+// macros
+#define WELCOME_MESSAGE         "..."
+#define NO_MATCH_MESSAGE        "???"
+#define APPLICATION_ICON        "applications-other"
+#define DEFAULT_HOTKEY          "<Super>space"
+#define DEFAULT_ICON            GTK_STOCK_FIND
+#define NO_MATCH_ICON           GTK_STOCK_DIALOG_QUESTION
+#define INPUT_STRING_SIZE       20
+#define SHOW_IGNORE_TIME        100000
+#define APPLICATIONS_DIR_0      "/usr/share/applications"
+#define APPLICATIONS_DIR_1      "/usr/local/share/applications"
+#define USER_APPLICATIONS_DIR   ".local/share/applications"
 
-// preferences/switches
+#define COUNTOF(array)          (sizeof array / sizeof array[0])
+
+// preferences
 #define P(type, group, name, value) type group##_##name = value;;
 PREFERENCES_LIST
 #undef P
-static bool             one_time;
+static bool             one_time = false;
 
 // launcher stuff
 static GHashTable*      action_map;
@@ -103,6 +93,11 @@ static char*            user_app_dir;
 
 //------------------------------------------
 // helper functions
+
+inline static int iclamp(int v, int min, int max) 
+{ 
+    return v < min ? min : v > max ? max : v; 
+}
 
 static bool is_readable_file(const char* file)
 {
@@ -525,11 +520,12 @@ static void screen_changed(GtkWidget *widget, GdkScreen *old_screen, gpointer us
 static gboolean expose_event(GtkWidget *widget, GdkEvent *event, gpointer data)
 {
     cairo_t* cr = gdk_cairo_create(widget->window);
+    GtkStyle* st = gtk_widget_get_style(window);
     clear(cr);
-    draw_window(cr);
+    draw_window(cr, st);
     draw_icon(cr, icon_pixbuf);
-    draw_dots(cr, selection, filter_list->len);
-    draw_labels(cr, action_name, input_string);
+    draw_dots(cr, st, selection, filter_list->len);
+    draw_labels(cr, st, action_name, input_string);
     cairo_destroy(cr);
     return false;
 }
@@ -552,7 +548,7 @@ static void create_widgets(void)
 }
 
 //------------------------------------------
-// config files
+// misc
 
 static void key_file_save(GKeyFile* kf, const char* file_name)
 {
@@ -566,19 +562,7 @@ static void key_file_save(GKeyFile* kf, const char* file_name)
     fclose(f);
 }
 
-// macro for writing to keyfile
-static void save_config(void)
-{
-    GKeyFile* kf = g_key_file_new();
-    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-    #define P(type, group, key, value) g_key_file_set_##type (kf, #group, #key, group##_##key);
-    PREFERENCES_LIST
-    #undef P
-    key_file_save(kf, config_file);
-    g_key_file_free(kf);
-}
-
-static void read_config(void)
+void read_config(void)
 {
     static time_t config_file_time;
     struct stat st;
@@ -597,11 +581,22 @@ static void read_config(void)
     Border_width = iclamp(Border_width, 0, 20);
     Window_width = iclamp(Window_width, 200, 800);
     Window_height = iclamp(Window_height, 100, 800);
-    Labels_fontsize1 = iclamp(Labels_fontsize1, 6, 32);
-    Labels_fontsize2 = iclamp(Labels_fontsize2, 6, 32);
+    Labels_size1 = iclamp(Labels_size1, 6, 32);
+    Labels_size2 = iclamp(Labels_size2, 6, 32);
 }
 
-static void save_mnemonics(void)
+void save_config(void)
+{
+    GKeyFile* kf = g_key_file_new();
+    g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    #define P(type, group, key, value) g_key_file_set_##type (kf, #group, #key, group##_##key);
+    PREFERENCES_LIST
+    #undef P
+    key_file_save(kf, config_file);
+    g_key_file_free(kf);
+}
+
+void save_mnemonics(void)
 {
     GKeyFile* kf = g_key_file_new();
     GHashTableIter iter;
@@ -634,21 +629,6 @@ void load_mnemonics(void)
     }
     g_key_file_free(kf);
 }
-
-static void init_config_files(void)
-{
-    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
-    g_mkdir_with_parents(dir, 0700);
-    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
-    action_file = g_build_filename(dir, "actions.rc", NULL);
-    commands_file = g_build_filename(dir, "commands.rc", NULL);
-    g_free(dir);
-    atexit(save_config);
-    atexit(save_mnemonics);
-}
-
-//------------------------------------------
-// misc
 
 static void* update_all(void* user_data)
 {
@@ -698,55 +678,6 @@ static void register_hotkey(void)
             edit_settings_action(STR_S(""), NULL); // launch editor
         gtk_widget_destroy(dialog);
         exit(EXIT_FAILURE);
-    }
-}
-
-// strcasestr it a gnu extension, b must be a static cstring
-#define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
-static const char* get_desktop_env(void)
-{
-    // the problem with DESKTOP_SESSION is that some distros put their name there
-    char* kde0 = getenv("KDE_SESSION_VERSION");
-    char* kde1 = getenv("KDE_FULL_SESSION");
-    char* gnome = getenv("GNOME_DESKTOP_SESSION_ID");
-    char* session = getenv("DESKTOP_SESSION");
-    char* current_desktop = getenv("XDG_CURRENT_DESKTOP");
-    char* xdg_prefix = getenv("XDG_MENU_PREFIX");
-
-    session = session ? session : "";
-    xdg_prefix = xdg_prefix ? xdg_prefix : "";
-    current_desktop = current_desktop ? current_desktop : "";
-
-    // see http://standards.freedesktop.org/menu-spec/latest/apb.html
-    const char* desktop = "Old";
-    if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
-        desktop = "KDE";
-    else if (CONTAINS(session, "gnome") || gnome != NULL)
-        desktop = "GNOME";
-    else if (CONTAINS(session, "xfce") || CONTAINS(xdg_prefix, "xfce"))
-        desktop = "XFCE";
-    else if (CONTAINS(session, "lxde") || CONTAINS(current_desktop, "lxde"))
-        desktop = "LXDE";
-    else if (CONTAINS(session, "rox")) // verify
-        desktop = "ROX";
-    // TODO: add MATE, Razor, TDE, Unity
-    printf("detected desktop: %s\n", desktop);
-    return desktop;
-}
-#undef CONTAINS
-
-static void parse_commandline(int argc, char** argv)
-{
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--one-way")) {
-            one_time = true;
-        } else if (!strcmp(argv[i], "--help")) {
-            printf("fehlstart 0.4.0 (c) 2013 maep\noptions:\n"
-                   "\t--one-way\texit after one use\n");
-            exit(EXIT_SUCCESS);
-        } else {
-            printf("invalid option: %s\n", argv[i]);
-        }
     }
 }
 
@@ -804,6 +735,68 @@ static void edit_commands_action(String command, Action* action)
 }
 
 //------------------------------------------
+// settings etc...
+
+void init_config_files(void)
+{
+    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
+    action_file = g_build_filename(dir, "actions.rc", NULL);
+    commands_file = g_build_filename(dir, "commands.rc", NULL);
+    g_free(dir);
+}
+
+void parse_commandline(int argc, char** argv)
+{
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--one-way")) {
+            one_time = true;
+        } else if (!strcmp(argv[i], "--help")) {
+            printf("fehlstart 0.4.0 (c) 2013 maep\noptions:\n"
+                   "\t--one-way\texit after one use\n");
+            exit(EXIT_SUCCESS);
+        } else {
+            printf("invalid option: %s\n", argv[i]);
+        }
+    }
+}
+
+const char* get_desktop_env(void)
+{
+    // see http://standards.freedesktop.org/menu-spec/latest/apb.html
+    // the problem with DESKTOP_SESSION is that some distros put their name there
+    char* kde0 = getenv("KDE_SESSION_VERSION");
+    char* kde1 = getenv("KDE_FULL_SESSION");
+    char* gnome = getenv("GNOME_DESKTOP_SESSION_ID");
+    char* session = getenv("DESKTOP_SESSION");
+    char* current_desktop = getenv("XDG_CURRENT_DESKTOP");
+    char* xdg_prefix = getenv("XDG_MENU_PREFIX");
+
+    session = session ? session : "";
+    xdg_prefix = xdg_prefix ? xdg_prefix : "";
+    current_desktop = current_desktop ? current_desktop : "";
+
+    // TODO: get rid of this
+    #define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b)) 
+    const char* desktop = "Old";
+    if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
+        desktop = "KDE";
+    else if (CONTAINS(session, "gnome") || gnome != NULL)
+        desktop = "GNOME";
+    else if (CONTAINS(session, "xfce") || CONTAINS(xdg_prefix, "xfce"))
+        desktop = "XFCE";
+    else if (CONTAINS(session, "lxde") || CONTAINS(current_desktop, "lxde"))
+        desktop = "LXDE";
+    else if (CONTAINS(session, "rox")) // verify
+        desktop = "ROX";
+    #undef CONTAINS
+    // TODO: add MATE, Razor, TDE, Unity
+    printf("detected desktop: %s\n", desktop);
+    return desktop;
+}
+
+//------------------------------------------
 // main
 
 int main(int argc, char** argv)
@@ -831,6 +824,9 @@ int main(int argc, char** argv)
         show_window();
     else
         register_hotkey();
+
+    atexit(save_config);
+    atexit(save_mnemonics);
 
     gtk_main();
     return EXIT_SUCCESS;

@@ -7,9 +7,23 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <gtk/gtk.h>
 
 // --------------------------------------------
-// preferences
+// types
+
+typedef struct {
+    char*       str;
+    uint32_t    len;
+    bool        can_free;
+} String;
+
+typedef struct {
+    double      r;
+    double      g;
+    double      b;
+    double      a;
+} Color;
 
 // some typedefs so the xmacros will work
 typedef char* string;
@@ -24,44 +38,45 @@ typedef int integer;
     P(string,  Border,   color,      "default") \
     P(integer, Border,   width,      2) \
     P(string,  Window,   color,      "default") \
-    P(string,  Window,   width,      200) \
-    P(string,  Window,   height,     100) \
+    P(integer, Window,   width,      200) \
+    P(integer, Window,   height,     100) \
     P(boolean, Window,   round,      true) \
     P(boolean, Window,   arch,       true) \
     P(string,  Labels,   color,      "default") \
-    P(integer, Labels,   fontsize1,  14) \
-    P(integer, Labels,   fontsize2,  10) \
+    P(integer, Labels,   size1,      14) \
+    P(integer, Labels,   size2,      12) \
     P(boolean, Labels,   showinput,  true)
-    
-#define P(type, group, key, value) extern type group##_##key = value;
+
+#define P(type, group, key, value) extern type group##_##key;
 PREFERENCES_LIST
 #undef P
 
 // --------------------------------------------
-// helper functions
+// graphics.c functions
 
-inline static int imin(int a, int b) 
-{ 
-    return a < b ? a : b; 
-}
+// draw labels, action upper label, input lower label
+// action font size is reduced if it doesn't fit in window
+void draw_labels(cairo_t* cr, GtkStyle* st, const char* action, const char* input);
 
-inline static int iclamp(int v, int min, int max) 
-{ 
-    return v < min ? min : v > max ? max : v; 
-}
+// draws the icon
+void draw_icon(cairo_t* cr, GdkPixbuf* icon);
+
+// draw the indicator dots left & right, max 3
+void draw_dots(cairo_t* cr, GtkStyle* st, int index, int max);
+
+// draw window backround
+void draw_window(cairo_t* cr, GtkStyle* st);
+
+// clears context with transparent black
+void clear(cairo_t* cr);
 
 // --------------------------------------------
 // string.c functions
 
-typedef struct {
-    char* str;
-    uint32_t len;
-    bool can_free;
-} String;
-
 // string "constructor" for creating strings with no runtime overhead at compile time
 // for static strings
 #define STR_S(arg) ((String) {(arg), sizeof(arg) - 1, false})
+
 // for initializer lists, etc
 #define STR_I(arg) {(arg), sizeof(arg) - 1, false}
 
