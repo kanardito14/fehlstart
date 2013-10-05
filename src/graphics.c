@@ -6,26 +6,19 @@
 */
 
 #include <math.h>
-#include "fehlstart.h"
+#include "graphics.h"
 
-static const double PI = 0x1.921fb54442d18p+1;
-
-inline static int imin(int a, int b)
+static void rect(cairo_t* cr, double x, double y, double w, double h, double r)
 {
-    return a < b ? a : b;
-}
-
-static void round_rect(cairo_t* cr, double x, double y, double w, double h, double r)
-{
-    if (Window_round) {
+    if (r > 0) {
         cairo_arc(cr, x + w - r, y + r, r, 1.5 * PI, 0);
         cairo_arc(cr, x + w - r, y + h - r, r, 0, 0.5 * PI);
         cairo_arc(cr, x + r, y + h - r, r, 0.5 * PI, PI);
         cairo_arc(cr, x + r, y + r, r, PI, 1.5 * PI);
-        cairo_close_path(cr);
     } else {
         cairo_rectangle(cr, 0, 0, w, h);
     }
+    cairo_close_path(cr);
 }
 
 static Color parse_color(const char* color_name, GdkColor default_color)
@@ -91,15 +84,15 @@ void draw_dots(cairo_t* cr, GtkStyle* st, int index, int max)
     cairo_fill(cr);
 }
 
-void draw_window(cairo_t* cr, GtkStyle* st)
+void draw_window(cairo_t* cr, GtkStyle* st, int flags)
 {
     double w = Window_width, h = Window_height;
     double brad = fmax(w, h) / 10; // corner radius
     double w2 = w / 2, h3 = w * 3;
-    double crad = sqrt(w2 * w2 + h3 * h3);
+    double crad = flags & WINDOW_ROUND ? sqrt(w2 * w2 + h3 * h3) : 0;
     Color c = parse_color(Window_color, st->bg[GTK_STATE_SELECTED]);
 
-    round_rect(cr, 0, 0, w, h, brad);
+    rect(cr, 0, 0, w, h, brad);
     cairo_clip(cr);
 
     cairo_set_source_rgb(cr, c.r, c.g, c.b);
@@ -116,7 +109,7 @@ void draw_window(cairo_t* cr, GtkStyle* st)
     }
 
     c = parse_color(Border_color, st->text[GTK_STATE_SELECTED]);
-    round_rect(cr, 0, 0, w, h, brad);
+    rect(cr, 0, 0, w, h, brad);
     cairo_set_line_width(cr, Border_width * 2);
     cairo_set_source_rgb(cr, c.r, c.g, c.b);
     cairo_stroke(cr);

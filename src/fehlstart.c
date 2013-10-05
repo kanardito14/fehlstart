@@ -7,7 +7,6 @@
 
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
 #include <time.h>
 
 #include <strings.h>
@@ -18,14 +17,15 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
 #include <glib/gstdio.h>
 #include <gio/gdesktopappinfo.h>
 
 #include <keybinder.h>
 
-#include "fehlstart.h"
+#include "strang.h"
+#include "graphics.h"
+#include "util.h"
 
 // types
 
@@ -94,27 +94,6 @@ static char*            user_app_dir;
 //------------------------------------------
 // helper functions
 
-inline static int iclamp(int v, int min, int max) 
-{ 
-    return v < min ? min : v > max ? max : v; 
-}
-
-static bool is_readable_file(const char* file)
-{
-    FILE* f = fopen(file, "r");
-    if (f)
-        fclose(f);
-    return f != 0;
-}
-
-static const char* get_home_dir(void)
-{
-    const char* home = getenv("HOME");
-    if (!home)
-        home = g_get_home_dir();
-    return home;
-}
-
 static String get_first_input_word(void)
 {
     for (uint32_t i = 0; i < input_string_size; i++)
@@ -122,28 +101,6 @@ static String get_first_input_word(void)
             return str_wrap_n(input_string, i);
     return str_wrap_n(input_string, input_string_size);
 }
-
-#if !GLIB_CHECK_VERSION(2,32,0)
-static bool g_hash_table_contains(GHashTable* hash_table, gconstpointer key)
-{
-    return g_hash_table_lookup_extended(hash_table, key, NULL, NULL);
-}
-#endif
-
-#if !GLIB_CHECK_VERSION(2,26,0)
-static void g_key_file_set_uint64(GKeyFile* kf, const char* group, const char* key, uint64_t value)
-{
-    char* str_value = g_strdup_printf("%llu", (unsigned long long)value);
-    g_key_file_set_string(kf, group, key, str_value);
-    g_free(str_value);
-}
-
-static uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error)
-{
-    char* value = g_key_file_get_string(kf, group, key, error);
-    return value ? g_ascii_strtoull(value, 0, 10) : 0;
-}
-#endif
 
 //------------------------------------------
 // action functions
@@ -165,8 +122,8 @@ static void free_action(gpointer data)
     Action* a = data;
     str_free(a->key);
     str_free(a->name);
-    str_free(a->icon);
     str_free(a->exec);
+    str_free(a->icon);
     str_free(a->mnemonic);
     free(a);
 }
@@ -193,7 +150,7 @@ static void load_launcher(String file, Action* action)
     g_object_unref(info);
 }
 
-static void reload_launcher (Action* action)
+static void reload_launcher(Action* action)
 {
     str_free(action->name);
     str_free(action->exec);
@@ -552,18 +509,6 @@ static void create_widgets(void)
 
 //------------------------------------------
 // misc
-
-static void key_file_save(GKeyFile* kf, const char* file_name)
-{
-    FILE* f = fopen(file_name, "w");
-    if (!f)
-        return;
-    gsize length = 0;
-    char* data = g_key_file_to_data(kf, &length, NULL);
-    fwrite(data, 1, length, f);
-    g_free(data);
-    fclose(f);
-}
 
 void read_config(void)
 {
