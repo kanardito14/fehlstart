@@ -299,22 +299,25 @@ static void filter_scrore_add(gpointer key, gpointer value, gpointer user_data)
         return;
 
     a->score = -1;
-    if (str_starts_with(a->mnemonic, filter) || str_starts_with(filter, a->mnemonic))
+    if (str_starts_with(a->mnemonic, filter))
         a->score = 100000;
 
     if (a->score < 0) {
         unsigned pos = str_find_first_i(a->name, filter);
         if (pos != STR_END)
-            a->score = 100 + (filter.len - pos);
+            a->score = 100 + filter.len - pos;
     }
-
+    
     if (a->score < 0) {
         unsigned pos = str_find_first_i(a->exec, filter);
         if (pos != STR_END)
-            a->score = 1 + (filter.len - pos);
+            a->score = 1 + filter.len - pos;
     }
-    if (a->score > 0)
+    
+    if (a->score > 0) {
+        a->score += a->mnemonic.len > 0;
         g_array_append_val(filter_list, a);
+    }
 }
 
 static int compare_score(gconstpointer a, gconstpointer b)
@@ -673,7 +676,7 @@ static void register_hotkey(void)
         GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
             GTK_BUTTONS_NONE, "Hotkey '%s' is already being used!", Bindings_launch);
         gtk_dialog_add_buttons(GTK_DIALOG(dialog), "Edit Settings", GTK_RESPONSE_ACCEPT,
-            "Cancel", GTK_RESPONSE_REJECT, NULL);
+            "Quit", GTK_RESPONSE_REJECT, NULL);
         if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT)
             edit_settings_action(STR_S(""), NULL); // launch editor
         gtk_widget_destroy(dialog);
@@ -760,40 +763,6 @@ void parse_commandline(int argc, char** argv)
             printf("invalid option: %s\n", argv[i]);
         }
     }
-}
-
-const char* get_desktop_env(void)
-{
-    // see http://standards.freedesktop.org/menu-spec/latest/apb.html
-    // the problem with DESKTOP_SESSION is that some distros put their name there
-    char* kde0 = getenv("KDE_SESSION_VERSION");
-    char* kde1 = getenv("KDE_FULL_SESSION");
-    char* gnome = getenv("GNOME_DESKTOP_SESSION_ID");
-    char* session = getenv("DESKTOP_SESSION");
-    char* current_desktop = getenv("XDG_CURRENT_DESKTOP");
-    char* xdg_prefix = getenv("XDG_MENU_PREFIX");
-
-    session = session ? session : "";
-    xdg_prefix = xdg_prefix ? xdg_prefix : "";
-    current_desktop = current_desktop ? current_desktop : "";
-
-    // TODO: get rid of this
-    #define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b)) 
-    const char* desktop = "Old";
-    if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
-        desktop = "KDE";
-    else if (CONTAINS(session, "gnome") || gnome != NULL)
-        desktop = "GNOME";
-    else if (CONTAINS(session, "xfce") || CONTAINS(xdg_prefix, "xfce"))
-        desktop = "XFCE";
-    else if (CONTAINS(session, "lxde") || CONTAINS(current_desktop, "lxde"))
-        desktop = "LXDE";
-    else if (CONTAINS(session, "rox")) // verify
-        desktop = "ROX";
-    #undef CONTAINS
-    // TODO: add MATE, Razor, TDE, Unity
-    printf("detected desktop: %s\n", desktop);
-    return desktop;
 }
 
 //------------------------------------------
