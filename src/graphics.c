@@ -8,6 +8,13 @@
 #include <math.h>
 #include "graphics.h"
 
+typedef struct {
+    double      r;
+    double      g;
+    double      b;
+    double      a;
+} Color;
+
 static void rect(cairo_t* cr, double x, double y, double w, double h, double r)
 {
     if (r > 0) {

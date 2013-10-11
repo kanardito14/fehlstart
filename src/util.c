@@ -48,12 +48,42 @@ bool is_readable_file(const char* file)
     return f != 0;
 }
 
+bool file_changed(const char* file, time_t* time)
+{
+    struct stat st;
+    if (!stat(file, &st))
+        return false;
+    bool changed = (st.st_mtime != *time);
+    *time = st.st_mtime;
+    return changed;
+}
+
 const char* get_home_dir(void)
 {
     const char* home = getenv("HOME");
     if (!home)
         home = g_get_home_dir();
     return home;
+}
+
+// forks and opens file in an editor and returns immediately
+// the plan was that run_editor only returns after the editor exits.
+// that way I could reload the settings after changes have been made.
+// but xdg-open and friends return immediately so that plan was foiled :(
+static void run_editor(const char* file)
+{
+    if (!is_readable_file(file))
+        return;
+    pid_t pid = fork();
+    if (pid != 0)
+        return;
+    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
+    execlp("xdg-open", "", file, (char*)0);
+    // TODO check if editor is sensible, maybe replace with EDITOR env?
+    execlp("x-terminal-emulator", "", "-e", "editor", file, (char*)0);
+    execlp("xterm", "", "-e", "vi", file, (char*)0); // getting desperate
+    printf("failed to open editor for %s\n", file);
+    exit(EXIT_FAILURE);
 }
 
 void save_key_file(GKeyFile* kf, const char* file_name)

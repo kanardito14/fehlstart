@@ -5,6 +5,9 @@
 *   copyright 2013 maep and contributors
 */
 
+#ifndef UTIL_H
+#define UTIL_H
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <glib.h>
@@ -19,6 +22,9 @@ const char* get_desktop_env(void);
 
 // retuns true if file is readable
 bool is_readable_file(const char* file);
+
+// updates time to files mtime, returns true changed
+bool file_changed(const char* file, time_t* time);
 
 // return the path of the home dir
 // based on HOME variable or glib fallback
@@ -37,6 +43,9 @@ void save_key_file(GKeyFile* kf, const char* file_name);
     uint64_t g_key_file_get_uint64(GKeyFile* kf, const char* group, const char* key, GError** error);
 #endif
 
+// returns the length of a static array
+#define COUNTOF(array) (sizeof array / sizeof array[0])
+
 // return minimum of a and b
 inline static int imin(int a, int b)
 {
@@ -49,3 +58,4 @@ inline static int iclamp(int v, int min, int max)
     return v < min ? min : v > max ? max : v; 
 }
 
+#endif

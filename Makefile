@@ -8,7 +8,7 @@ LIBS = $(shell pkg-config --libs $(PKGS))
 CFLAGS	:= -Wall -Wextra -Wno-unused-parameter -pthread -std=c99 $(INCS) $(CFLAGS)
 LDFLAGS	:= -pthread -lm $(LIBS) $(LDFLAGS)
 
-SRCS = $(wildcard *.c)
+SRCS = $(wildcard src/*.c)
 OBJS = $(SRCS:.c=.o)
 
 ifeq ($(DEBUG),1)
@@ -22,7 +22,7 @@ all: fehlstart
 fehlstart: $(OBJS)
 	$(CC) -o $@ $(OFLAGS) $(OBJS) $(LDFLAGS)
 
-%.o: src/%.c
+%.o: %.c
 	$(CC) -c $(OFLAGS) $(CFLAGS) $(CPPFLAGS) $< -o $@
 
 install:

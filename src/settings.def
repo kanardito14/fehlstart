@@ -1,0 +1,20 @@
+X(string,  Bindings, launch,     DEFAULT_HOTKEY) 
+
+X(boolean, Matching, executable, true) 
+
+X(boolean, Icons,    show,       true) 
+X(boolean, Icons,    scale,      true) 
+
+X(string,  Border,   color,      "default") 
+X(integer, Border,   width,      2) 
+
+X(string,  Window,   color,      "default") 
+X(integer, Window,   width,      200) 
+X(integer, Window,   height,     100) 
+X(boolean, Window,   round,      true) 
+X(boolean, Window,   arch,       true) 
+
+X(string,  Labels,   color,      "default") 
+X(integer, Labels,   size1,      14) 
+X(integer, Labels,   size2,      12) 
+X(boolean, Labels,   showinput,  true)

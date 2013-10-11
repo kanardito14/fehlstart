@@ -10,7 +10,6 @@
 #include <time.h>
 
 #include <strings.h>
-#include <dirent.h>
 #include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -29,18 +28,16 @@
 
 // types
 
-typedef struct Action {
-    String      key;                // map key, .desktop file
-    time_t      file_time;          // .desktop time stamp
-    String      name;               // display caption
-    String      exec;               // executable / hint
-    String      mnemonic;           // what user typed
-    String      icon;
-    int         score;              // calculated prority
-    time_t      time;               // last used timestamp
-    void        (*action)(String, struct Action*);
-    bool        used;               // unused actions are cached to speed scans
-} Action;
+typedef char* string;
+typedef bool boolean;
+typedef int integer;
+
+// settings struct
+typedef struct Settings {
+    #define X(type, group, key, value) type group##_##key;
+    #include "settings.def"
+    #undef X
+} Settings;
 
 // forward declarations
 
@@ -61,8 +58,6 @@ static void* update_all(void*);
 #define APPLICATIONS_DIR_0      "/usr/share/applications"
 #define APPLICATIONS_DIR_1      "/usr/local/share/applications"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
-
-#define COUNTOF(array)          (sizeof array / sizeof array[0])
 
 // preferences
 #define P(type, group, name, value) type group##_##name = value;;
@@ -105,145 +100,6 @@ static String get_first_input_word(void)
 //------------------------------------------
 // action functions
 
-static void add_action(const char* name, const char* hint, const char* icon, void (*action)(String, Action*))
-{
-    Action* a = calloc(1, sizeof(Action));
-    a->key = str_new(name);
-    a->name = str_new(name);
-    a->exec = str_new(hint);
-    a->icon = str_new(icon);
-    a->action = action;
-    a->used = true;
-    g_hash_table_insert(action_map, a->key.str, a);
-}
-
-static void free_action(gpointer data)
-{
-    Action* a = data;
-    str_free(a->key);
-    str_free(a->name);
-    str_free(a->exec);
-    str_free(a->icon);
-    str_free(a->mnemonic);
-    free(a);
-}
-
-static void load_launcher(String file, Action* action)
-{
-    struct stat st;
-    stat(file.str, &st);
-    action->file_time = st.st_mtime;
-    action->action = launch_action;
-    GDesktopAppInfo* info = g_desktop_app_info_new_from_filename(file.str);
-    if (!info)
-        return;
-    action->used = !g_desktop_app_info_get_is_hidden(info) && g_app_info_should_show(G_APP_INFO(info));
-    if (action->used) {
-        GAppInfo* app = G_APP_INFO(info);
-        action->name = str_new(g_app_info_get_name(app));
-        if (Matching_executable)
-            action->exec = str_new(g_app_info_get_executable(app));
-        GIcon* icon = g_app_info_get_icon(G_APP_INFO(app));
-        if (icon != NULL && Icons_show)
-            action->icon = str_own(g_icon_to_string(icon));
-    }
-    g_object_unref(info);
-}
-
-static void reload_launcher(Action* action)
-{
-    str_free(action->name);
-    str_free(action->exec);
-    str_free(action->icon);
-    action->used = false;
-    load_launcher(action->key, action);
-}
-
-static Action* new_launcher(String file)
-{
-    Action* a = calloc(1, sizeof(Action));
-    a->key = file;
-    load_launcher(file, a);
-    return a;
-}
-
-static void update_launcher(gpointer key, gpointer value, gpointer user_data)
-{
-    Action* a = value;
-    struct stat st;
-    if (a->action != launch_action)
-        return;
-    if (stat(a->key.str, &st))
-        a->used = false;
-    else if (a->file_time != st.st_mtime)
-        reload_launcher(a);
-}
-
-static void add_launchers(String dir_name)
-{
-    DIR* dir = opendir(dir_name.str);
-    if (!dir)
-        return;
-    struct dirent* ent = NULL;
-    while ((ent = readdir(dir))) {
-        String file_name = str_wrap(ent->d_name);
-        if (!str_ends_with_i(file_name, STR_S(".desktop")))
-            continue;
-        String full_path = str_assemble_path(dir_name, file_name);
-        if (g_hash_table_contains(action_map, full_path.str)) {
-            str_free(full_path);
-        } else {
-            pthread_mutex_lock(&map_mutex);
-            g_hash_table_insert(action_map, full_path.str, new_launcher(full_path));
-            pthread_mutex_unlock(&map_mutex);
-        }
-    }
-    closedir(dir);
-}
-
-static void update_commands()
-{
-    static time_t commands_file_time;
-    struct stat st;
-    if (stat(commands_file, &st) && st.st_mtime == commands_file_time)
-        return;
-    commands_file_time = st.st_mtime;
-
-    GHashTableIter iter;
-    gpointer key = NULL, value = NULL;
-    g_hash_table_iter_init(&iter, action_map);
-    while (g_hash_table_iter_next(&iter, &key, &value)) {
-        Action* a = value;
-        if (a->action == command_action)
-            a->used = false;
-    }
-
-    GKeyFile* kf = g_key_file_new();
-    g_key_file_load_from_file(kf, commands_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-    char** groups = g_key_file_get_groups(kf, NULL);
-    for (unsigned i = 0; groups[i]; i++) {
-        String key = str_concat(STR_S("!cmd:"), str_wrap(groups[i]));
-        Action* a = g_hash_table_lookup(action_map, key.str);
-        if (a) {
-            str_free(a->exec);
-            str_free(a->icon);
-            str_free(key);
-        } else {
-            a = calloc(1, sizeof(Action));
-            a->action = command_action;
-            a->name = str_new(groups[i]);
-            a->key = key;
-            pthread_mutex_lock(&map_mutex);
-            g_hash_table_insert(action_map, key.str, a);
-            pthread_mutex_unlock(&map_mutex);
-        }
-        a->exec = str_own(g_key_file_get_string(kf, groups[i], "Exec", NULL));
-        a->icon = str_own(g_key_file_get_string(kf, groups[i], "Icon", NULL));
-        a->used = true;
-    }
-    g_strfreev(groups);
-    g_key_file_free(kf);
-}
 
 //------------------------------------------
 // filter functions
@@ -510,103 +366,46 @@ static void create_widgets(void)
 //------------------------------------------
 // misc
 
-void read_config(void)
+void read_config(const char* config_file)
 {
-    static time_t config_file_time;
-    struct stat st;
-    if (stat(config_file, &st) && st.st_mtime == config_file_time)
-        return;
-    config_file_time = st.st_mtime;
-
     GKeyFile *kf = g_key_file_new();
     if (g_key_file_load_from_file(kf, config_file, G_KEY_FILE_NONE, NULL)) {
-        #define P(type, group, key, value) if (g_key_file_has_key(kf, #group, #key, NULL))\
-            group##_##key = g_key_file_get_##type(kf, #group, #key, NULL);
-        PREFERENCES_LIST
-        #undef P
+        #define X(type, group, key, value) if (g_key_file_has_key(kf, #group, #key, NULL))\
+            settings.group##_##key = g_key_file_get_##type(kf, #group, #key, NULL);
+        #include "settings.def"
+        #undef X
     }
     g_key_file_free(kf);
-    Border_width = iclamp(Border_width, 0, 20);
-    Window_width = iclamp(Window_width, 200, 800);
-    Window_height = iclamp(Window_height, 100, 800);
-    Labels_size1 = iclamp(Labels_size1, 6, 32);
-    Labels_size2 = iclamp(Labels_size2, 6, 32);
+    // some sanity checks
+    settings.Border_width = iclamp(Border_width, 0, 20);
+    settings.Window_width = iclamp(Window_width, 200, 800);
+    settings.Window_height = iclamp(Window_height, 100, 800);
+    settings.Labels_size1 = iclamp(Labels_size1, 6, 32);
+    settings.Labels_size2 = iclamp(Labels_size2, 6, 32);
 }
 
-void save_config(void)
+void save_config(const char* config_file)
 {
     GKeyFile* kf = g_key_file_new();
     g_key_file_load_from_file(kf, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-    #define P(type, group, key, value) g_key_file_set_##type (kf, #group, #key, group##_##key);
-    PREFERENCES_LIST
-    #undef P
+    #define X(type, group, key, value) g_key_file_set_##type (kf, #group, #key, group##_##key);
+    #include "settings.def"
+    #undef X
     key_file_save(kf, config_file);
-    g_key_file_free(kf);
-}
-
-void save_mnemonics(void)
-{
-    GKeyFile* kf = g_key_file_new();
-    GHashTableIter iter;
-    gpointer key = NULL, value = NULL;
-    g_hash_table_iter_init(&iter, action_map);
-    while (g_hash_table_iter_next(&iter, &key, &value)) {
-        Action* a = value;
-        if (a->mnemonic.len > 0) {
-            g_key_file_set_string(kf, a->key.str, "mnemonic", a->mnemonic.str);
-            g_key_file_set_uint64(kf, a->key.str, "time", (uint64_t)a->time);
-        }
-    }
-    key_file_save(kf, action_file);
-    g_key_file_free(kf);
-}
-
-void load_mnemonics(void)
-{
-    GKeyFile* kf = g_key_file_new();
-    if (g_key_file_load_from_file(kf, action_file, G_KEY_FILE_NONE, NULL)) {
-        char** groups = g_key_file_get_groups(kf, NULL);
-        for (unsigned i = 0; groups[i]; i++) {
-            Action* a = g_hash_table_lookup(action_map, groups[i]);
-            if (!a)
-                continue;
-            char* s = g_key_file_get_string(kf, groups[i], "mnemonic", NULL);
-            a->mnemonic = str_own(s);
-            a->time = (time_t)g_key_file_get_uint64(kf, groups[i], "time", NULL);
-        }
-    }
     g_key_file_free(kf);
 }
 
 static void* update_all(void* user_data)
 {
-    read_config();
-    update_commands();
+    if (file_changed())
+        read_config();
+    if (file_changed())
+        update_commands();
     g_hash_table_foreach(action_map, update_launcher, NULL);
     add_launchers(STR_S(APPLICATIONS_DIR_0));
     add_launchers(STR_S(APPLICATIONS_DIR_1));
     add_launchers(STR_S(USER_APPLICATIONS_DIR));
     return NULL;
-}
-
-// opens file in an editor and returns immediately
-// the plan was that run_editor only returns after the editor exits.
-// that way I could reload the settings after changes have been made.
-// but xdg-open and friends return immediately so that plan was foiled :(
-static void run_editor(const char* file)
-{
-    if (!is_readable_file(file))
-        return;
-    pid_t pid = fork();
-    if (pid != 0)
-        return;
-
-    signal(SIGCHLD, SIG_DFL); // go back to default child behaviour
-    execlp("xdg-open", "", file, (char*)0);
-    execlp("x-terminal-emulator", "", "-e", "editor", file, (char*)0);
-    execlp("xterm", "", "-e", "vi", file, (char*)0); // getting desperate
-    printf("failed to open editor for %s\n", file);
-    exit(EXIT_FAILURE);
 }
 
 static void register_hotkey(void)
@@ -683,19 +482,9 @@ static void edit_commands_action(String command, Action* action)
 }
 
 //------------------------------------------
-// settings etc...
+// main
 
-void init_config_files(void)
-{
-    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
-    g_mkdir_with_parents(dir, 0700);
-    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
-    action_file = g_build_filename(dir, "actions.rc", NULL);
-    commands_file = g_build_filename(dir, "commands.rc", NULL);
-    g_free(dir);
-}
-
-void parse_commandline(int argc, char** argv)
+static void parse_commandline(int argc, char** argv)
 {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--one-way")) {
@@ -710,8 +499,11 @@ void parse_commandline(int argc, char** argv)
     }
 }
 
-//------------------------------------------
-// main
+static void exit_handler(void)
+{
+    save_config();
+    save_mnemonics();
+}
 
 int main(int argc, char** argv)
 {
@@ -729,19 +521,24 @@ int main(int argc, char** argv)
     add_action("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, edit_settings_action);
     add_action("fehlstart actions", "commands", GTK_STOCK_EXECUTE, edit_commands_action);
 
-    init_config_files();
-    update_all(NULL); // read config and launchers
-    load_mnemonics();
+    // create user settings file if needed
+    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
+    action_file = g_build_filename(dir, "actions.rc", NULL);
+    commands_file = g_build_filename(dir, "commands.rc", NULL);
+    g_free(dir);
 
-    create_widgets();
-    if (one_time) // one-time use
+    update_all(NULL);       // read config and launchers
+    load_mnemonics();       // load "learned" user behaviour
+    create_widgets();       // create ui
+    atexit(exit_handler);   // set up exit handler
+    
+    if (one_time)           // one-time use
         show_window();
     else
         register_hotkey();
 
-    atexit(save_config);
-    atexit(save_mnemonics);
-
-    gtk_main();
+    gtk_main();             // start main loop
     return EXIT_SUCCESS;
 }

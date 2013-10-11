@@ -5,6 +5,9 @@
 *   copyright 2013 maep and contributors
 */
 
+#ifndef STRANG_H
+#define STRANG_H
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -62,7 +65,7 @@ String str_concat(String a, String b);
 // example 1: "/foo" "bar" -> "/foo/bar"
 // example 2: "/foo/" "bar" -> "/foo/bar"
 // must be freed with str_free()
-String str_assemble_path(String a, String b);
+String str_join_path(String a, String b);
 
 // create substring, using same memory as s
 String str_substring(String s, uint32_t begin, uint32_t length);
@@ -102,3 +105,5 @@ bool str_equal_i(String a, String b);
 
 // converts string to lowercase, returned string is same as s
 String str_to_lower(String s);
+
+#endif

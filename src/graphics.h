@@ -5,21 +5,12 @@
 *   copyright 2013 maep and contributors
 */
 
+#ifndef GRAPHICS_H
+#define GRAPHICS_H
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <gtk/gtk.h>
-
-enum {
-    WINDOW_ROUND    = 1 << 0,
-    WINDOW_ARCH     = 1 << 1
-};
-
-typedef struct {
-    double      r;
-    double      g;
-    double      b;
-    double      a;
-} Color;
 
 // draw labels, action upper label, input lower label
 // action font size is reduced if it doesn't fit in window
@@ -36,3 +27,5 @@ void draw_window(cairo_t* cr, GtkStyle* st);
 
 // clears context with transparent black
 void clear(cairo_t* cr);
+
+#endif
