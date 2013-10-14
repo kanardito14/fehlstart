@@ -417,12 +417,14 @@ static void draw_labels(cairo_t* cr, Settings* set, GtkStyle* sty, const char* a
     cairo_move_to(cr, x, y);
     cairo_show_text(cr, action);
 
-    cairo_set_font_size(cr, set->Labels_size2);
-    cairo_text_extents(cr, input, &extents);
-    x = (set->Window_width - extents.width) / 2.0;
-    y = set->Window_height - set->Border_width * 2.0;
-    cairo_move_to(cr, x, y);
-    cairo_show_text(cr, input);
+    if (set->Labels_showinput) {
+        cairo_set_font_size(cr, set->Labels_size2);
+        cairo_text_extents(cr, input, &extents);
+        x = (set->Window_width - extents.width) / 2.0;
+        y = set->Window_height - set->Border_width * 2.0;
+        cairo_move_to(cr, x, y);
+        cairo_show_text(cr, input);
+    }
 }
 
 static void draw_icon(cairo_t* cr, Settings* set, GdkPixbuf* icon)
