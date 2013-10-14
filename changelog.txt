@@ -1,3 +1,10 @@
+0.4
+ * rewrote gui in cairo
+ * removed old gtk code
+ * tuned scoring algorithm
+ * added more settings
+ * tried to clean code
+
 0.3.1
  * window color setting
  * fixed crash with commands
