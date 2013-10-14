@@ -28,8 +28,7 @@ fehlstart: $(OBJS)
 	$(CC) -c $(OFLAGS) $(CFLAGS) $(CPPFLAGS) $< -o $@
 
 install:
-	install -d $(INSTALLDIR)/bin
-	install -m 755 fehlstart $(INSTALLDIR)/bin/fehlstart
+	install -Dsm 755 fehlstart $(INSTALLDIR)/bin/fehlstart
 
 clean:
 	rm -rf fehlstart $(OBJS)

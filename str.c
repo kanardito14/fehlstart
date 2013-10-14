@@ -8,10 +8,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <malloc.h>
+#include "str.h"
 
-#include "fehlstart.h"
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
+static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
 {
     if (!s)
         return STR_S("");
@@ -19,9 +20,7 @@ inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
         n = strlen(s);
     if (n == 0)
         return STR_S("");
-    return (String) {
-        (char*)s, n, can_free
-    };
+    return (String) {(char*)s, n, can_free};
 }
 
 String str_wrap_n(const char* s, uint32_t n)
@@ -41,9 +40,7 @@ String str_own(const char* s)
 
 String str_create(uint32_t len)
 {
-    return (String) {
-        calloc(len + 1, 1), len, true
-    };
+    return (String) {calloc(len + 1, 1), len, true};
 }
 
 String str_new(const char* s)
@@ -74,7 +71,7 @@ String str_concat(String a, String b)
     return dst;
 }
 
-String str_assemble_path(String prefix, String suffix)
+String str_join_path(String prefix, String suffix)
 {
     String path = str_create(prefix.len + suffix.len + 1);
 
@@ -162,11 +159,6 @@ static bool str_ends_with_impl(String s, String suffix, int (*dif) (char, char))
     return true;
 }
 
-bool str_equals(String a, String b)
-{
-    return (a.len == b.len) && str_starts_with_impl(a, b, cdiff_s);
-}
-
 bool str_starts_with(String s, String prefix)
 {
     return str_starts_with_impl(s, prefix, cdiff_s);
@@ -204,7 +196,7 @@ int str_compare_i(String a, String b)
 
 bool str_equal_i(String a, String b)
 {
-    return str_compare_impl(a, b, cdiff_i) == 0;
+    return (a.len == b.len) && str_compare_impl(a, b, cdiff_i) == 0;
 }
 
 int str_compare(String a, String b)
@@ -214,7 +206,7 @@ int str_compare(String a, String b)
 
 bool str_equal(String a, String b)
 {
-    return str_compare_impl(a, b, cdiff_s) == 0;
+    return (a.len == b.len) && str_compare_impl(a, b, cdiff_s) == 0;
 }
 
 //------------------------------------------

@@ -7,71 +7,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <gtk/gtk.h>
-
-// --------------------------------------------
-// types
 
 typedef struct {
     char*       str;
     uint32_t    len;
     bool        can_free;
 } String;
-
-typedef struct {
-    double      r;
-    double      g;
-    double      b;
-    double      a;
-} Color;
-
-// some typedefs so the xmacros will work
-typedef char* string;
-typedef bool boolean;
-typedef int integer;
-
-#define PREFERENCES_LIST \
-    P(string,  Bindings, launch,     DEFAULT_HOTKEY) \
-    P(boolean, Matching, executable, true) \
-    P(boolean, Icons,    show,       true) \
-    P(boolean, Icons,    scale,      true) \
-    P(string,  Border,   color,      "default") \
-    P(integer, Border,   width,      2) \
-    P(string,  Window,   color,      "default") \
-    P(integer, Window,   width,      200) \
-    P(integer, Window,   height,     100) \
-    P(boolean, Window,   round,      true) \
-    P(boolean, Window,   arch,       true) \
-    P(string,  Labels,   color,      "default") \
-    P(integer, Labels,   size1,      14) \
-    P(integer, Labels,   size2,      12) \
-    P(boolean, Labels,   showinput,  true)
-
-#define P(type, group, key, value) extern type group##_##key;
-PREFERENCES_LIST
-#undef P
-
-// --------------------------------------------
-// graphics.c functions
-
-// draw labels, action upper label, input lower label
-// action font size is reduced if it doesn't fit in window
-void draw_labels(cairo_t* cr, GtkStyle* st, const char* action, const char* input);
-
-// draws the icon
-void draw_icon(cairo_t* cr, GdkPixbuf* icon);
-
-// draw the indicator dots left & right, max 3
-void draw_dots(cairo_t* cr, GtkStyle* st, int index, int max);
-
-// draw window backround
-void draw_window(cairo_t* cr, GtkStyle* st);
-
-// clears context with transparent black
-void clear(cairo_t* cr);
-
-// --------------------------------------------
-// string.c functions
 
 // string "constructor" for creating strings with no runtime overhead at compile time
 // for static strings
@@ -121,13 +62,10 @@ String str_concat(String a, String b);
 // example 1: "/foo" "bar" -> "/foo/bar"
 // example 2: "/foo/" "bar" -> "/foo/bar"
 // must be freed with str_free()
-String str_assemble_path(String a, String b);
+String str_join_path(String a, String b);
 
 // create substring, using same memory as s
 String str_substring(String s, uint32_t begin, uint32_t length);
-
-// return true if equal, case sensitive
-bool str_equals(String a, String b);
 
 // returns true if s contains what, case sensitive
 bool str_contains(String s, String what);
