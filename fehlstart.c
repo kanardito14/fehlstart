@@ -42,6 +42,24 @@ typedef struct Action {
     bool        used;               // unused actions are cached to speed scans
 } Action;
 
+typedef struct {
+    double      r;
+    double      g;
+    double      b;
+    double      a;
+} Color;
+
+typedef char* string;
+typedef bool boolean;
+typedef int integer;
+
+typedef struct Settings {
+    #define SETTING(type, group, key, value) type group##_##key;
+    #include "settings.def"
+    #undef SETTING
+    bool one_time;
+} Settings;
+
 // forward declarations
 
 static void launch_action(String, Action*);
@@ -58,17 +76,19 @@ static void* update_all(void*);
 #define NO_MATCH_ICON           GTK_STOCK_DIALOG_QUESTION
 #define INPUT_STRING_SIZE       20
 #define SHOW_IGNORE_TIME        100000
+#define PI                      (0x1.921fb54442d18p+1)
 #define APPLICATIONS_DIR_0      "/usr/share/applications"
 #define APPLICATIONS_DIR_1      "/usr/local/share/applications"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
-
 #define COUNTOF(array)          (sizeof array / sizeof array[0])
 
 // preferences
-#define P(type, group, name, value) type group##_##name = value;;
-PREFERENCES_LIST
-#undef P
-static bool             one_time = false;
+static Settings settings = {
+    #define SETTING(type, group, name, value) .##group##_##name = value,
+    #include "settings.def"
+    #undef SETTING
+    .one_time = false;
+};
 
 // launcher stuff
 static GHashTable*      action_map;
@@ -94,10 +114,9 @@ static char*            user_app_dir;
 //------------------------------------------
 // helper functions
 
-inline static int iclamp(int v, int min, int max) 
-{ 
-    return v < min ? min : v > max ? max : v; 
-}
+inline static int imin(int a, int b) { return a < b ? a : b; }
+
+inline static int iclamp(int v, int min, int max) { return v < min ? min : v > max ? max : v; }
 
 static bool is_readable_file(const char* file)
 {
@@ -329,7 +348,7 @@ static void filter_action_list(String filter)
     if (filter_list->len)
         g_array_remove_range(filter_list, 0, filter_list->len);
     if (filter.len == 0)
-        return;        
+        return;
     g_hash_table_foreach(action_map, filter_scrore_add, &filter);
     g_array_sort(filter_list, compare_score);
 }
@@ -358,11 +377,11 @@ static void load_icon(const char* name)
         g_object_unref(icon_pixbuf);
         icon_pixbuf = NULL;
     }
-    
+
     if (!Icons_show)
         return;
-       
-    // if the size is uncommon, svgs might be used which load 
+
+    // if the size is uncommon, svgs might be used which load
     // too slow on my atom machine
     int h = Window_height / 2;
     if (!Icons_scale) {
@@ -484,9 +503,9 @@ static gboolean key_press_event(GtkWidget* widget, GdkEventKey* event, gpointer 
     case GDK_Left:
     case GDK_Up:
         if (filter_list->len)
-            selection = (selection + filter_list->len - 1) % filter_list->len;        
+            selection = (selection + filter_list->len - 1) % filter_list->len;
         show_selected();
-        break;    
+        break;
     case GDK_Right:
     case GDK_Tab:
     case GDK_Down:
@@ -737,16 +756,6 @@ static void edit_commands_action(String command, Action* action)
 //------------------------------------------
 // settings etc...
 
-void init_config_files(void)
-{
-    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
-    g_mkdir_with_parents(dir, 0700);
-    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
-    action_file = g_build_filename(dir, "actions.rc", NULL);
-    commands_file = g_build_filename(dir, "commands.rc", NULL);
-    g_free(dir);
-}
-
 void parse_commandline(int argc, char** argv)
 {
     for (int i = 1; i < argc; i++) {
@@ -778,7 +787,7 @@ const char* get_desktop_env(void)
     current_desktop = current_desktop ? current_desktop : "";
 
     // TODO: get rid of this
-    #define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b)) 
+    #define CONTAINS(a, b) str_contains_i(str_wrap(a), STR_S(b))
     const char* desktop = "Old";
     if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
@@ -815,19 +824,25 @@ int main(int argc, char** argv)
     add_action("fehlstart settings", "config preferences", GTK_STOCK_PREFERENCES, edit_settings_action);
     add_action("fehlstart actions", "commands", GTK_STOCK_EXECUTE, edit_commands_action);
 
-    init_config_files();
+    // init config files
+    gchar* dir = g_build_filename(g_get_user_config_dir(), "fehlstart", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    config_file = g_build_filename(dir, "fehlstart.rc", NULL);
+    action_file = g_build_filename(dir, "actions.rc", NULL);
+    commands_file = g_build_filename(dir, "commands.rc", NULL);
+    g_free(dir);
+
     update_all(NULL); // read config and launchers
     load_mnemonics();
-
     create_widgets();
     if (one_time) // one-time use
         show_window();
     else
         register_hotkey();
 
-    atexit(save_config);
-    atexit(save_mnemonics);
-
     gtk_main();
+
+    save_config(config_file);
+    save_mnemonics(action_file, action_map);
     return EXIT_SUCCESS;
 }
