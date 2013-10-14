@@ -8,10 +8,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <malloc.h>
+#include "str.h"
 
-#include "fehlstart.h"
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-inline static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
+static String str_wrap_impl(const char* s, uint32_t n, bool can_free)
 {
     if (!s)
         return STR_S("");
@@ -70,7 +71,7 @@ String str_concat(String a, String b)
     return dst;
 }
 
-String str_assemble_path(String prefix, String suffix)
+String str_join_path(String prefix, String suffix)
 {
     String path = str_create(prefix.len + suffix.len + 1);
 
