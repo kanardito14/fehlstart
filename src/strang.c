@@ -8,9 +8,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <malloc.h>
+#include "strang.h"
 
-#include "fehlstart.h"
-
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 // this is an attempt of a c string lib, it's not really written for speed
 // but even on my crappy atom it's fast enough for this use case
 // TODO: replace can_free with flags: STR_FREE, STR_TERMINATED, STR_MUTABLE

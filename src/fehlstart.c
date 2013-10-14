@@ -24,10 +24,10 @@
 
 #include "strang.h"
 #include "graphics.h"
+#include "action.h"
 #include "util.h"
 
 // types
-
 typedef char* string;
 typedef bool boolean;
 typedef int integer;
@@ -60,9 +60,9 @@ static void* update_all(void*);
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
 
 // preferences
-#define P(type, group, name, value) type group##_##name = value;;
+#define X(type, group, name, value) type group##_##name = value;;
 PREFERENCES_LIST
-#undef P
+#undef X
 static bool             one_time = false;
 
 // launcher stuff
