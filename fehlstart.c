@@ -964,3 +964,4 @@ int main(int argc, char** argv)
     save_mnemonics(mnemonic_file, action_map);
     return EXIT_SUCCESS;
 }
+

@@ -14,3 +14,4 @@ SETTING(string,  Labels,   color,      "default")
 SETTING(integer, Labels,   size1,      14)
 SETTING(integer, Labels,   size2,      12)
 SETTING(boolean, Labels,   showinput,  true)
+

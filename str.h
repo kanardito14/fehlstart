@@ -99,3 +99,4 @@ bool str_equal_i(String a, String b);
 
 // converts string to lowercase, returned string is same as s
 String str_to_lower(String s);
+
