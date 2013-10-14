@@ -323,7 +323,7 @@ static void filter_scrore_add(gpointer key, gpointer value, gpointer user_data)
         return;
 
     a->score = -1;
-    if (str_starts_with(a->mnemonic, filter) || str_starts_with(filter, a->mnemonic))
+    if (str_starts_with(a->mnemonic, filter))
         a->score = 100000;
 
     if (a->score < 0) {
@@ -337,8 +337,11 @@ static void filter_scrore_add(gpointer key, gpointer value, gpointer user_data)
         if (pos != STR_END)
             a->score = 1 + (filter.len - pos);
     }
-    if (a->score > 0)
+
+    if (a->score > 0) {
+        a->score += a->mnemonic.len > 0;
         g_array_append_val(filter_list, a);
+    }
 }
 
 static int compare_score(gconstpointer a, gconstpointer b)
