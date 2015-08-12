@@ -79,6 +79,7 @@ static void* update_all(void*);
 #define PI                      (0x1.921fb54442d18p+1)
 #define APPLICATIONS_DIR_0      "/usr/share/applications"
 #define APPLICATIONS_DIR_1      "/usr/local/share/applications"
+#define APPLICATIONS_DIR_2      "/usr/share/applications/kde4"
 #define USER_APPLICATIONS_DIR   ".local/share/applications"
 #define COUNTOF(array)          (sizeof array / sizeof array[0])
 
@@ -776,7 +777,8 @@ static void* update_all(void* user_data)
     g_hash_table_foreach(action_map, update_launcher, NULL);
     add_launchers(STR_S(APPLICATIONS_DIR_0));
     add_launchers(STR_S(APPLICATIONS_DIR_1));
-    add_launchers(STR_S(USER_APPLICATIONS_DIR));
+    add_launchers(STR_S(APPLICATIONS_DIR_2));
+    add_launchers(STR_S(user_app_dir));
     return NULL;
 }
 
@@ -909,6 +911,8 @@ const char* get_desktop_env(void)
     const char* desktop = "Old";
     if (CONTAINS(session, "kde") || kde0 != NULL || kde1 != NULL)
         desktop = "KDE";
+    else if (CONTAINS(current_desktop, "unity"))
+	desktop = "Unity";
     else if (CONTAINS(session, "gnome") || gnome != NULL)
         desktop = "GNOME";
     else if (CONTAINS(session, "xfce") || CONTAINS(xdg_prefix, "xfce"))
